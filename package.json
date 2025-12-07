@@ -1,0 +1,13 @@
+{
+  "name": "renewhelper",
+  "version": "1.3.0",
+  "description": "A serverless service lifecycle manager on Cloudflare Workers",
+  "main": "worker.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "deploy": "wrangler deploy"
+  },
+  "author": "LOSTFREE",
+  "license": "MIT",
+  "private": true
+}

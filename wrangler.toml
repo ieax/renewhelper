@@ -1,0 +1,21 @@
+name = "renewhelper"
+main = "_worker.js"
+compatibility_date = "2023-12-01"
+
+# 绑定 KV 数据库
+# 注意：在一键部署过程中，Cloudflare 会提示您创建一个新的 KV 并自动填充 ID
+[[kv_namespaces]]
+binding = "RENEW_KV"
+id = ""  # 留空，部署时会自动生成或提示关联
+preview_id = ""
+
+# 设置定时任务 (Cron Triggers)
+# 这里设置每 30 分钟检查一次 (0/30 * * * *)
+# 必须设置这个，否则自动续期和通知功能无法触发
+[triggers]
+crons = ["0/30 * * * *"]
+
+# 环境变量默认值 (可选)
+# 部署时通常会提示用户输入，这里作为默认值
+[vars]
+AUTH_PASSWORD = "admin"
