@@ -202,7 +202,7 @@
 
 **爱发电** - 国内用户
 
-[![爱发电](https://img.shields.io/badge/爱发电-Aifadian-946ce6?style=for-the-badge&logo=github&logoColor=white)](https://aifadian.com/a/lostfree)
+[![爱发电](https://img.shields.io/badge/爱发电-Afdian-946ce6?style=for-the-badge&logo=github&logoColor=white)](https://afdian.com/a/lostfree)
 
 ---
 
