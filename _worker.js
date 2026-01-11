@@ -564,25 +564,47 @@ const Notifier = {
     async send(settings, title, body) {
         if (!settings.enableNotify) return "NOTIFY_DISABLED";
 
-        const channels = settings.enabledChannels || [];
-        if (channels.length === 0 && settings.notifyUrl) {
-            return await this.adapters.webhook(
-                { url: settings.notifyUrl },
-                title,
-                body
-            );
-        }
-
         const tasks = [];
-        const cfg = settings.notifyConfig || {};
 
-        for (const ch of channels) {
-            if (this.adapters[ch] && cfg[ch]) {
-                tasks.push(
-                    this.adapters[ch](cfg[ch], title, body)
-                        .then((res) => `[${ch}: ${res}]`)
-                        .catch((err) => `[${ch}: ERR ${err.message}]`)
+        // 【修改点 7】优先使用新的 notifyChannels 数组（动态渠道系统）
+        const dynamicChannels = settings.notifyChannels || [];
+        if (dynamicChannels.length > 0) {
+            for (const ch of dynamicChannels) {
+                if (!ch.enabled) continue; // 跳过禁用的渠道
+
+                // ch = { type, config, name, enabled, ... }
+                if (this.adapters[ch.type]) {
+                    tasks.push(
+                        this.adapters[ch.type](ch.config, title, body)
+                            .then(res => `[${ch.name || ch.type}: ${res}]`)
+                            .catch(err => `[${ch.name || ch.type}: ERR ${err.message}]`)
+                    );
+                }
+            }
+        }
+        // 【修改点 7】回退到旧的 enabledChannels + notifyConfig 结构（向后兼容）
+        else {
+            const channels = settings.enabledChannels || [];
+
+            // Legacy Webhook URL fallback
+            if (channels.length === 0 && settings.notifyUrl) {
+                return await this.adapters.webhook(
+                    { url: settings.notifyUrl },
+                    title,
+                    body
                 );
+            }
+
+            const cfg = settings.notifyConfig || {};
+
+            for (const ch of channels) {
+                if (this.adapters[ch] && cfg[ch]) {
+                    tasks.push(
+                        this.adapters[ch](cfg[ch], title, body)
+                            .then((res) => `[${ch}: ${res}]`)
+                            .catch((err) => `[${ch}: ERR ${err.message}]`)
+                    );
+                }
             }
         }
 
@@ -2546,180 +2568,54 @@ const HTML = `<!DOCTYPE html>
                             </el-icon>
                         </div>
                         <div class="accordion-content" :class="{expanded:settingsExpanded.notify}">
-                            <div class="flex items-center gap-4 mb-4">
-                                <span class="text-sm font-bold text-slate-700 dark:text-slate-200">{{ t('pushSwitch') }}</span>
-                                <el-switch v-model="settingsForm.enableNotify" style="--el-switch-on-color:#2563eb;"></el-switch>
-                                <div v-if="settingsForm.enableNotify" class="ml-auto flex items-center gap-2">
-                                    <span class="text-xs text-gray-500">{{ t('lblPushTitle') || 'Title' }}</span>
-                                    <el-input v-model="settingsForm.notifyTitle" :placeholder="t('pushTitle')" size="small" class="!w-48"></el-input>
+                            <!-- 通知总开关和标题配置 -->
+                            <div class="flex items-center justify-between mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-100 dark:border-blue-900">
+                                <div class="flex flex-col">
+                                    <span class="text-sm font-bold text-blue-700 dark:text-blue-400">{{ t('pushSwitch') }}</span>
+                                    <span class="text-[10px] text-slate-500">Master Switch</span>
                                 </div>
+                                <el-switch v-model="settingsForm.enableNotify" style="--el-switch-on-color:#2563eb;"></el-switch>
                             </div>
 
-                            <div v-if="settingsForm.enableNotify">
-                                <el-collapse v-model="expandedChannels" accordion>
-                            <!-- Telegram -->
-                            <el-collapse-item name="telegram">
-                                <template #title>
-                                    <div class="flex items-center w-full pr-4">
-                                        <el-icon class="mr-2 text-lg"><Promotion /></el-icon>
-                                        <span class="font-bold flex-1">Telegram</span>
-                                        <el-switch v-model="channelMap.telegram" style="--el-switch-on-color:#2563eb;" @change="toggleChannel('telegram')" @click.stop></el-switch>
-                                    </div>
-                                </template>
-                                <div class="p-2">
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblToken') }}</span><el-input v-model="settingsForm.notifyConfig.telegram.token" placeholder="123456:ABC-DEF..." size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblChatId') }}</span><el-input v-model="settingsForm.notifyConfig.telegram.chatId" placeholder="-100xxxx" size="small"></el-input></div>
-                                    <div class="flex justify-end mt-2"><el-button size="small" type="primary" link @click="testChannel('telegram')" :loading="testing.telegram">{{ t('btnTest') }}</el-button></div>
+                            <!-- 通知渠道管理（表格 + 操作按钮） -->
+                            <div v-if="settingsForm.enableNotify" class="flex flex-col gap-3">
+                                <!-- 操作按钮行 -->
+                                <div class="flex gap-2 mb-2">
+                                    <el-button type="primary" :icon="Plus" class="flex-1 mecha-btn !bg-blue-600" @click="openAddChannel">{{ t('add') }}</el-button>
+                                    <el-button type="danger" plain :icon="Delete" :disabled="channelSelection.length===0" class="mecha-btn" @click="batchDeleteChannels">{{ t('batchDelete') }}</el-button>
                                 </div>
-                            </el-collapse-item>
-                            
-                            <!-- Bark -->
-                            <el-collapse-item name="bark">
-                                <template #title>
-                                    <div class="flex items-center w-full pr-4">
-                                        <el-icon class="mr-2 text-lg"><Iphone /></el-icon>
-                                        <span class="font-bold flex-1">Bark</span>
-                                        <el-switch v-model="channelMap.bark" style="--el-switch-on-color:#2563eb;" @change="toggleChannel('bark')" @click.stop></el-switch>
-                                    </div>
-                                </template>
-                                <div class="p-2">
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblServer') }}</span><el-input v-model="settingsForm.notifyConfig.bark.server" placeholder="https://api.day.app" size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblDevKey') }}</span><el-input v-model="settingsForm.notifyConfig.bark.key" placeholder="Key" size="small"></el-input></div>
-                                    <div class="flex justify-end mt-2"><el-button size="small" type="primary" link @click="testChannel('bark')" :loading="testing.bark">{{ t('btnTest') }}</el-button></div>
-                                </div>
-                            </el-collapse-item>
 
-                            <!-- Gotify -->
-                            <el-collapse-item name="gotify">
-                                <template #title>
-                                    <div class="flex items-center w-full pr-4">
-                                        <el-icon class="mr-2 text-lg"><Bell /></el-icon>
-                                        <span class="font-bold flex-1">Gotify</span>
-                                        <el-switch v-model="channelMap.gotify" style="--el-switch-on-color:#2563eb;" @change="toggleChannel('gotify')" @click.stop></el-switch>
-                                    </div>
-                                </template>
-                                <div class="p-2">
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblServer') }}</span><el-input v-model="settingsForm.notifyConfig.gotify.server" placeholder="https://gotify.example.com" size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblToken') }}</span><el-input v-model="settingsForm.notifyConfig.gotify.token" placeholder="App Token" size="small"></el-input></div>
-                                    <div class="flex justify-end mt-2"><el-button size="small" type="primary" link @click="testChannel('gotify')" :loading="testing.gotify">{{ t('btnTest') }}</el-button></div>
-                                </div>
-                            </el-collapse-item>
+                                <!-- 渠道列表表格 -->
+                                <el-table :data="settingsForm.notifyChannels" style="width: 100%" class="mecha-table mb-2" @selection-change="handleChannelSelection" row-key="id">
+                                    <el-table-column type="selection" width="30"></el-table-column>
+                                    <el-table-column :label="t('type')" width="100">
+                                        <template #default="scope">
+                                            <el-tag size="small" effect="plain" class="capitalize">{{ scope.row.type }}</el-tag>
+                                        </template>
+                                    </el-table-column>
+                                    <el-table-column :label="t('formName')" min-width="120">
+                                        <template #default="scope">
+                                            <span class="font-bold text-slate-700 dark:text-slate-200">{{ scope.row.name }}</span>
+                                        </template>
+                                    </el-table-column>
+                                    <el-table-column :label="t('status')" width="70">
+                                        <template #default="scope">
+                                            <el-switch v-model="scope.row.enabled" size="small" style="--el-switch-on-color:#2563eb;"></el-switch>
+                                        </template>
+                                    </el-table-column>
+                                    <el-table-column :label="t('actions')" width="160" align="right">
+                                        <template #default="scope">
+                                            <div class="flex justify-end gap-1">
+                                                <el-button link type="primary" @click="testDynamicChannel(scope.row)">{{ t('btnTest') }}</el-button>
+                                                <el-button link type="primary" :icon="Edit" @click="editChannel(scope.row)"></el-button>
+                                                <el-button link type="danger" :icon="Delete" @click="deleteChannel(scope.$index)"></el-button>
+                                            </div>
+                                        </template>
+                                    </el-table-column>
+                                </el-table>
 
-                            <!-- Ntfy -->
-                            <el-collapse-item name="ntfy">
-                                <template #title>
-                                    <div class="flex items-center w-full pr-4">
-                                        <el-icon class="mr-2 text-lg"><Position /></el-icon>
-                                        <span class="font-bold flex-1">Ntfy</span>
-                                        <el-switch v-model="channelMap.ntfy" style="--el-switch-on-color:#2563eb;" @change="toggleChannel('ntfy')" @click.stop></el-switch>
-                                    </div>
-                                </template>
-                                <div class="p-2">
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblServer') }}</span><el-input v-model="settingsForm.notifyConfig.ntfy.server" placeholder="https://ntfy.sh" size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblTopic') }}</span><el-input v-model="settingsForm.notifyConfig.ntfy.topic" placeholder="Topic" size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblToken') }}</span><el-input v-model="settingsForm.notifyConfig.ntfy.token" placeholder="Optional Token" size="small"></el-input></div>
-                                    <div class="flex justify-end mt-2"><el-button size="small" type="primary" link @click="testChannel('ntfy')" :loading="testing.ntfy">{{ t('btnTest') }}</el-button></div>
-                                </div>
-                            </el-collapse-item>
-
-                            <!-- PushPlus -->
-                            <el-collapse-item name="pushplus">
-                                <template #title>
-                                    <div class="flex items-center w-full pr-4">
-                                        <el-icon class="mr-2 text-lg"><Comment /></el-icon>
-                                        <span class="font-bold flex-1">PushPlus</span>
-                                        <el-switch v-model="channelMap.pushplus" style="--el-switch-on-color:#2563eb;" @change="toggleChannel('pushplus')" @click.stop></el-switch>
-                                    </div>
-                                </template>
-                                <div class="p-2">
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblToken') }}</span><el-input v-model="settingsForm.notifyConfig.pushplus.token" placeholder="Token" size="small"></el-input></div>
-                                    <div class="flex justify-end mt-2"><el-button size="small" type="primary" link @click="testChannel('pushplus')" :loading="testing.pushplus">{{ t('btnTest') }}</el-button></div>
-                                </div>
-                            </el-collapse-item>
-
-                            <!-- NotifyX -->
-                            <el-collapse-item name="notifyx">
-                                <template #title>
-                                    <div class="flex items-center w-full pr-4">
-                                        <el-icon class="mr-2 text-lg"><Notification /></el-icon>
-                                        <span class="font-bold flex-1">NotifyX</span>
-                                        <el-switch v-model="channelMap.notifyx" style="--el-switch-on-color:#2563eb;" @change="toggleChannel('notifyx')" @click.stop></el-switch>
-                                    </div>
-                                </template>
-                                <div class="p-2">
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblApiKey') }}</span><el-input v-model="settingsForm.notifyConfig.notifyx.apiKey" placeholder="API Key" size="small"></el-input></div>
-                                    <div class="flex justify-end mt-2"><el-button size="small" type="primary" link @click="testChannel('notifyx')" :loading="testing.notifyx">{{ t('btnTest') }}</el-button></div>
-                                </div>
-                            </el-collapse-item>
-
-                            <!-- Resend -->
-                            <el-collapse-item name="resend">
-                                <template #title>
-                                    <div class="flex items-center w-full pr-4">
-                                        <el-icon class="mr-2 text-lg"><Message /></el-icon>
-                                        <span class="font-bold flex-1">Resend</span>
-                                        <el-switch v-model="channelMap.resend" style="--el-switch-on-color:#2563eb;" @change="toggleChannel('resend')" @click.stop></el-switch>
-                                    </div>
-                                </template>
-                                <div class="p-2">
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblApiKey') }}</span><el-input v-model="settingsForm.notifyConfig.resend.apiKey" placeholder="re_..." size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblFrom') }}</span><el-input v-model="settingsForm.notifyConfig.resend.from" placeholder="From" size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblTo') }}</span><el-input v-model="settingsForm.notifyConfig.resend.to" placeholder="To" size="small"></el-input></div>
-                                    <div class="flex justify-end mt-2"><el-button size="small" type="primary" link @click="testChannel('resend')" :loading="testing.resend">{{ t('btnTest') }}</el-button></div>
-                                </div>
-                            </el-collapse-item>
-
-                            <!-- Webhook 1 -->
-                            <el-collapse-item name="webhook">
-                                <template #title>
-                                    <div class="flex items-center w-full pr-4">
-                                        <el-icon class="mr-2 text-lg"><Connection /></el-icon>
-                                        <span class="font-bold flex-1">Webhook 1</span>
-                                        <el-switch v-model="channelMap.webhook" style="--el-switch-on-color:#2563eb;" @change="toggleChannel('webhook')" @click.stop></el-switch>
-                                    </div>
-                                </template>
-                                <div class="p-2">
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblServer') }}</span><el-input v-model="settingsForm.notifyConfig.webhook.url" placeholder="https://..." size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblHeaders') }}</span><el-input v-model="settingsForm.notifyConfig.webhook.headers" type="textarea" :rows="2" placeholder="JSON" size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblBody') }}</span><el-input v-model="settingsForm.notifyConfig.webhook.body" type="textarea" :rows="2" placeholder="JSON" size="small"></el-input></div>
-                                    <div class="flex justify-end mt-2"><el-button size="small" type="primary" link @click="testChannel('webhook')" :loading="testing.webhook">{{ t('btnTest') }}</el-button></div>
-                                </div>
-                            </el-collapse-item>
-
-                            <!-- Webhook 2 -->
-                            <el-collapse-item name="webhook2">
-                                <template #title>
-                                    <div class="flex items-center w-full pr-4">
-                                        <el-icon class="mr-2 text-lg"><Connection /></el-icon>
-                                        <span class="font-bold flex-1">Webhook 2</span>
-                                        <el-switch v-model="channelMap.webhook2" style="--el-switch-on-color:#2563eb;" @change="toggleChannel('webhook2')" @click.stop></el-switch>
-                                    </div>
-                                </template>
-                                <div class="p-2">
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblServer') }}</span><el-input v-model="settingsForm.notifyConfig.webhook2.url" placeholder="https://..." size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblHeaders') }}</span><el-input v-model="settingsForm.notifyConfig.webhook2.headers" type="textarea" :rows="2" placeholder="JSON" size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblBody') }}</span><el-input v-model="settingsForm.notifyConfig.webhook2.body" type="textarea" :rows="2" placeholder="JSON" size="small"></el-input></div>
-                                    <div class="flex justify-end mt-2"><el-button size="small" type="primary" link @click="testChannel('webhook2')" :loading="testing.webhook2">{{ t('btnTest') }}</el-button></div>
-                                </div>
-                            </el-collapse-item>
-
-                            <!-- Webhook 3 -->
-                            <el-collapse-item name="webhook3">
-                                <template #title>
-                                    <div class="flex items-center w-full pr-4">
-                                        <el-icon class="mr-2 text-lg"><Connection /></el-icon>
-                                        <span class="font-bold flex-1">Webhook 3</span>
-                                        <el-switch v-model="channelMap.webhook3" style="--el-switch-on-color:#2563eb;" @change="toggleChannel('webhook3')" @click.stop></el-switch>
-                                    </div>
-                                </template>
-                                <div class="p-2">
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblServer') }}</span><el-input v-model="settingsForm.notifyConfig.webhook3.url" placeholder="https://..." size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblHeaders') }}</span><el-input v-model="settingsForm.notifyConfig.webhook3.headers" type="textarea" :rows="2" placeholder="JSON" size="small"></el-input></div>
-                                    <div class="notify-item-row"><span class="notify-label">{{ t('lblBody') }}</span><el-input v-model="settingsForm.notifyConfig.webhook3.body" type="textarea" :rows="2" placeholder="JSON" size="small"></el-input></div>
-                                    <div class="flex justify-end mt-2"><el-button size="small" type="primary" link @click="testChannel('webhook3')" :loading="testing.webhook3">{{ t('btnTest') }}</el-button></div>
-                                </div>
-                            </el-collapse-item>
-                        </el-collapse>
+                                <!-- 空状态提示 -->
+                                <el-empty v-if="!settingsForm.notifyChannels || settingsForm.notifyChannels.length===0" :description="t('noLogs')" :image-size="60"></el-empty>
                             </div>
                         </div>
                     </div>
@@ -2770,6 +2666,42 @@ const HTML = `<!DOCTYPE html>
                 </div>
 
                 <template #footer><el-button @click="settingsVisible=false" size="large" class="mecha-btn">{{ t('cancel') }}</el-button><el-button type="primary" @click="saveSettings" size="large" class="mecha-btn !bg-blue-600">{{ t('saveSettings') }}</el-button></template>
+            </el-dialog>
+
+            <!-- Channel Config Dialog -->
+            <el-dialog v-model="channelDialogVisible" :title="isChannelEdit ? t('editService') : t('newService')" width="500px" align-center class="mecha-panel">
+                <el-form :model="channelForm" label-position="top">
+                    <el-form-item :label="t('formName')">
+                        <el-input v-model="channelForm.name" placeholder="Name (e.g. My Bot 1)"></el-input>
+                    </el-form-item>
+                    <el-form-item :label="t('type')">
+                        <el-select v-model="channelForm.type" style="width:100%">
+                            <el-option v-for="t in channelTypes" :key="t.value" :label="t.label" :value="t.value"></el-option>
+                        </el-select>
+                    </el-form-item>
+
+                    <!-- 动态配置字段区域 -->
+                    <div class="p-3 bg-slate-50 dark:bg-slate-900 rounded border border-slate-100 dark:border-slate-800">
+                        <template v-for="typ in channelTypes" :key="typ.value">
+                            <template v-if="channelForm.type === typ.value">
+                                <div v-for="(f, idx) in typ.fields" :key="idx" class="mb-3 last:mb-0">
+                                    <div class="text-xs font-bold text-slate-500 mb-1">{{ f.l }} <span class="text-[10px] text-slate-400 font-normal">({{f.k}})</span></div>
+                                    <el-input v-if="f.k === 'headers' || f.k === 'body'" v-model="channelForm.config[f.k]" type="textarea" :rows="3" :placeholder="f.p"></el-input>
+                                    <el-input v-else v-model="channelForm.config[f.k]" :placeholder="f.p"></el-input>
+                                </div>
+                            </template>
+                        </template>
+                    </div>
+                </el-form>
+                <template #footer>
+                    <div class="flex justify-between w-full">
+                        <el-button type="warning" plain @click="testDynamicChannel(channelForm)" :loading="testing['dynamic']">{{ t('btnTest') }}</el-button>
+                        <div>
+                            <el-button @click="channelDialogVisible=false">{{ t('cancel') }}</el-button>
+                            <el-button type="primary" @click="saveChannel">{{ t('save') }}</el-button>
+                        </div>
+                    </div>
+                </template>
             </el-dialog>
 
             <!-- Renew Dialog (also used for Add History) -->
@@ -3009,7 +2941,7 @@ const HTML = `<!DOCTYPE html>
             }
         };
         const messages = {
-            zh: { upcomingBillsDays:'待付款提醒天数', upcomingBills: '%s日内待付款项', filter:{expired:'已过期 / 今天', w7:'%s天内', w30:'30天内', thisMonth:'本月内', nextMonth:'下月内', halfYear:'半年内', oneYear:'1年内', new:'新服务 (<30天)', stable:'稳定 (1个月-1年)', long:'长期 (>1年)', m1:'最近1个月', m6:'半年内', year:'今年内', earlier:'更早以前'}, viewSwitch:'视图切换',viewProjects:'项目列表',viewSpending:'支出分析',annualSummary:'年度汇总',monthlyTrend:'月度趋势',noSpendingData:'暂无支出数据',avgMonthly:'月均',billAmount:'账单金额 (按账单周期)',opSpending:'实际支出 (按操作日期)',secPref: '偏好设置',manualRenew: '手动续期',tipToggle: '切换状态',tipRenew: '手动续期',tipEdit: '编辑服务',tipDelete: '删除服务',secNotify: '通知配置',secData: '数据管理',lblIcsTitle: '日历订阅',lblIcsUrl: '订阅地址 (iOS/Google)',btnCopy: '复制',btnResetToken: '重置令牌',loginTitle:'身份验证',passwordPlaceholder:'请输入访问密钥/Authorization Key',unlockBtn:'解锁终端/UNLOCK',check:'立即检查',add:'新增服务',settings:'系统设置',logs:'运行日志',logout:'安全退出',totalServices:'服务总数',expiringSoon:'即将到期',expiredAlert:'已过期 / 警告',serviceName:'服务名称',type:'类型',nextDue:'下次到期',uptime:'已运行',lastRenew:'上次续期',cyclePeriod:'周期',actions:'操作',cycle:'循环订阅',reset:'到期重置',disabled:'已停用',days:'天',daysUnit:'天',typeReset:'到期重置',typeCycle:'循环订阅',lunarCal:'农历',lbOffline:'离线',unit:{day:'天',month:'月',year:'年'},editService:'编辑服务',newService:'新增服务',formName:'名称',namePlaceholder:'例如: Netflix',formType:'模式',createDate:'创建时间',interval:'周期时长',note:'备注信息',status:'状态',active:'启用',disabledText:'禁用',cancel:'取消',save:'保存数据',saveSettings:'保存配置',settingsTitle:'系统设置',setNotify:'通知配置',pushSwitch:'推送总开关',pushUrl:'Webhook 地址',notifyThreshold:'提醒阈值',setAuto:'自动化配置',autoRenewSwitch:'自动续期',autoRenewThreshold:'自动续期阈值',autoDisableThreshold:'自动禁用阈值',daysOverdue:'天后触发',sysLogs:'系统日志',execLogs:'执行记录',clearHistory:'清空历史',noLogs:'无记录',liveLog:'实时终端',btnExport: '导出备份',btnImport: '恢复备份',btnTest: '发送测试',btnRefresh:'刷新日志',
+            zh: { upcomingBillsDays:'待付款提醒天数', upcomingBills: '%s日内待付款项', filter:{expired:'已过期 / 今天', w7:'%s天内', w30:'30天内', thisMonth:'本月内', nextMonth:'下月内', halfYear:'半年内', oneYear:'1年内', new:'新服务 (<30天)', stable:'稳定 (1个月-1年)', long:'长期 (>1年)', m1:'最近1个月', m6:'半年内', year:'今年内', earlier:'更早以前'}, viewSwitch:'视图切换',viewProjects:'项目列表',viewSpending:'支出分析',annualSummary:'年度汇总',monthlyTrend:'月度趋势',noSpendingData:'暂无支出数据',avgMonthly:'月均',billAmount:'账单金额 (按账单周期)',opSpending:'实际支出 (按操作日期)',secPref: '偏好设置',manualRenew: '手动续期',tipToggle: '切换状态',tipRenew: '手动续期',tipEdit: '编辑服务',tipDelete: '删除服务',secNotify: '通知配置',secData: '数据管理',lblIcsTitle: '日历订阅',lblIcsUrl: '订阅地址 (iOS/Google)',btnCopy: '复制',btnResetToken: '重置令牌',loginTitle:'身份验证',passwordPlaceholder:'请输入访问密钥/Authorization Key',unlockBtn:'解锁终端/UNLOCK',check:'立即检查',add:'新增服务',settings:'系统设置',logs:'运行日志',logout:'安全退出',totalServices:'服务总数',expiringSoon:'即将到期',expiredAlert:'已过期 / 警告',serviceName:'服务名称',type:'类型',nextDue:'下次到期',uptime:'已运行',lastRenew:'上次续期',cyclePeriod:'周期',actions:'操作',cycle:'循环订阅',reset:'到期重置',disabled:'已停用',days:'天',daysUnit:'天',typeReset:'到期重置',typeCycle:'循环订阅',lunarCal:'农历',lbOffline:'离线',unit:{day:'天',month:'月',year:'年'},editService:'编辑服务',newService:'新增服务',formName:'名称',namePlaceholder:'例如: Netflix',formType:'模式',createDate:'创建时间',interval:'周期时长',note:'备注信息',status:'状态',active:'启用',disabledText:'禁用',cancel:'取消',save:'保存数据',saveSettings:'保存配置',settingsTitle:'系统设置',setNotify:'通知配置',pushSwitch:'推送总开关',pushUrl:'Webhook 地址',notifyThreshold:'提醒阈值',setAuto:'自动化配置',autoRenewSwitch:'自动续期',autoRenewThreshold:'自动续期阈值',autoDisableThreshold:'自动禁用阈值',daysOverdue:'天后触发',sysLogs:'系统日志',execLogs:'执行记录',clearHistory:'清空历史',noLogs:'无记录',liveLog:'实时终端',btnExport: '导出备份',btnImport: '恢复备份',btnTest: '发送测试',batchDelete: '批量删除',btnRefresh:'刷新日志',
             lblEnable: '启用', lblToken: '令牌 (Token)', lblApiKey: 'API Key', lblChatId: '会话ID', 
             lblServer: '服务器URL', lblDevKey: '设备Key', lblFrom: '发件人', lblTo: '收件人',
             lblTopic: '主题 (Topic)',readOnly: '只读',
@@ -3017,7 +2949,7 @@ const HTML = `<!DOCTYPE html>
             lblHeaders: '请求头 (JSON)', lblBody: '消息体 (JSON)',
             tag:{alert:'触发提醒',renew:'自动续期',disable:'自动禁用',normal:'检查正常'},tagLatest:'最新',tagAuto:'自动',tagManual:'手动',msg:{confirmRenew: '确认将 [%s] 的更新日期设置为今天吗？',renewSuccess: '续期成功！日期已更新: %s -> %t',tokenReset: '令牌已重置，请更新订阅地址', copyOk: '链接已复制', exportSuccess: '备份已下载',importSuccess: '数据恢复成功，即将刷新',importFail: '导入失败，请检查文件格式',passReq:'请输入密码',saved:'保存成功',saveFail:'保存失败',cleared:'已清空',clearFail:'清空失败',loginFail:'验证失败',loadLogFail:'日志加载失败',confirmDel:'确认删除此项目?',dateError:'上次更新日期不能早于创建日期',nameReq:'服务名称不能为空',nameExist:'服务名称已存在',futureError:'上次续期不能是未来时间',serviceDisabled:'服务已停用',serviceEnabled:'服务已启用',execFinish: '执行完毕!'},tags:'标签',tagPlaceholder:'输入标签回车创建',searchPlaceholder:'搜索标题或备注...',tagsCol:'标签',tagAll:'全部',useLunar:'农历周期',lunarTip:'按农历日期计算周期',yes:'是',no:'否',timezone:'偏好时区',disabledFilter:'已停用',policyConfig:'自动化策略',policyNotify:'提醒提前期',policyAuto:'自动续期',policyRenewDay:'过期续期天数',useGlobal:'全局默认',autoRenewOnDesc:'过期自动续期',autoRenewOffDesc:'过期自动禁用',previewCalc:'根据上次续期日期和周期计算',nextDue:'下次到期',
             fixedPrice:'账单额',currency:'币种',defaultCurrency:'默认币种',history:'历史记录',historyTitle:'续费历史',totalCost:'总花费',totalCount:'续费次数',renewDate:'操作日期',billPeriod:'账单周期',startDate:'开始日期',endDate:'结束日期',actualPrice:'实付金额',notePlaceholder:'可选备注...',btnAddHist:'补录历史',modify:'修改',confirmDelHist:'删除此记录?',opDate:'操作日',amount:'金额',period:'周期',spendingDashboard:'花销看板',monthlyBreakdown:'月度明细',total:'总计',count:'笔',growth:'环比',currMonth:'本月',avgMonthlyLabel:'月均支出',itemDetails:'项目明细',noData:'暂无数据',predictedTag:'预测',last12M:'最近12个月', lblPushTitle:'自定义标题', pushTitle:'RenewHelper 报告'},
-            en: { upcomingBillsDays:'Pending Reminder', upcomingBills: '%s Days Pending', viewSwitch:'VIEW SWITCH',viewProjects:'PROJECTS',viewSpending:'DASHBOARD',annualSummary:'Annual Summary',monthlyTrend:'Monthly Trend',noSpendingData:'No Spending Data',billAmount:'BILL AMOUNT',opSpending:'ACTUAL COST', avgMonthly:'AVG', avgMonthlyLabel:'AVG MONTHLY', filter:{expired:'Overdue/Today', w7:'Within %s Days', w30:'Within 30 Days', future:'Future(>30d)', new:'New (<30d)', stable:'Stable (1m-1y)', long:'Long Term (>1y)', m1:'Last Month', m6:'Last 6 Months', year:'This Year', earlier:'Earlier'}, secPref: 'PREFERENCES',manualRenew: 'Quick Renew',tipToggle: 'Toggle Status',tipRenew: 'Quick Renew',tipEdit: 'Edit Service',tipDelete: 'Delete Service',secNotify: 'NOTIFICATIONS',secData: 'DATA MANAGEMENT',lblIcsTitle: 'CALENDAR SUBSCRIPTION',lblIcsUrl: 'ICS URL (iOS/Google Calendar)',btnCopy: 'COPY',btnResetToken: 'RESET TOKEN',loginTitle:'SYSTEM ACCESS',passwordPlaceholder:'Authorization Key',unlockBtn:'UNLOCK TERMINAL',check:'CHECK',add:'ADD NEW',settings:'CONFIG',logs:'LOGS',logout:'LOGOUT',totalServices:'TOTAL SERVICES',expiringSoon:'EXPIRING SOON',expiredAlert:'EXPIRED / ALERT',serviceName:'SERVICE NAME',type:'TYPE',nextDue:'NEXT DUE',uptime:'UPTIME',lastRenew:'LAST RENEW',cyclePeriod:'CYCLE',actions:'ACTIONS',cycle:'CYCLE',reset:'RESET',disabled:'DISABLED',days:'DAYS',daysUnit:'DAYS',typeReset:'RESET',typeCycle:'CYCLE',lunarCal:'Lunar',lbOffline:'OFFLINE',unit:{day:'DAY',month:'MTH',year:'YR'},editService:'EDIT SERVICE',newService:'NEW SERVICE',formName:'NAME',namePlaceholder:'e.g. Netflix',formType:'MODE',createDate:'CREATE DATE',interval:'INTERVAL',note:'NOTE',status:'STATUS',active:'ACTIVE',disabledText:'DISABLED',cancel:'CANCEL',save:'SAVE DATA',saveSettings:'SAVE CONFIG',settingsTitle:'SYSTEM CONFIG',setNotify:'NOTIFICATION',pushSwitch:'MASTER PUSH',pushUrl:'WEBHOOK URL',notifyThreshold:'ALERT THRESHOLD',setAuto:'AUTOMATION',autoRenewSwitch:'AUTO RENEW',autoRenewThreshold:'RENEW AFTER',autoDisableThreshold:'DISABLE AFTER',daysOverdue:'DAYS OVERDUE',sysLogs:'SYSTEM LOGS',execLogs:'EXECUTION LOGS',clearHistory:'CLEAR HISTORY',noLogs:'NO DATA',liveLog:'LIVE TERMINAL',btnExport: 'Export Data',btnImport: 'Import Data',btnTest: 'Send Test',btnRefresh:'REFRESH',last12M:'LAST 12M',
+            en: { upcomingBillsDays:'Pending Reminder', upcomingBills: '%s Days Pending', viewSwitch:'VIEW SWITCH',viewProjects:'PROJECTS',viewSpending:'DASHBOARD',annualSummary:'Annual Summary',monthlyTrend:'Monthly Trend',noSpendingData:'No Spending Data',billAmount:'BILL AMOUNT',opSpending:'ACTUAL COST', avgMonthly:'AVG', avgMonthlyLabel:'AVG MONTHLY', filter:{expired:'Overdue/Today', w7:'Within %s Days', w30:'Within 30 Days', future:'Future(>30d)', new:'New (<30d)', stable:'Stable (1m-1y)', long:'Long Term (>1y)', m1:'Last Month', m6:'Last 6 Months', year:'This Year', earlier:'Earlier'}, secPref: 'PREFERENCES',manualRenew: 'Quick Renew',tipToggle: 'Toggle Status',tipRenew: 'Quick Renew',tipEdit: 'Edit Service',tipDelete: 'Delete Service',secNotify: 'NOTIFICATIONS',secData: 'DATA MANAGEMENT',lblIcsTitle: 'CALENDAR SUBSCRIPTION',lblIcsUrl: 'ICS URL (iOS/Google Calendar)',btnCopy: 'COPY',btnResetToken: 'RESET TOKEN',loginTitle:'SYSTEM ACCESS',passwordPlaceholder:'Authorization Key',unlockBtn:'UNLOCK TERMINAL',check:'CHECK',add:'ADD NEW',settings:'CONFIG',logs:'LOGS',logout:'LOGOUT',totalServices:'TOTAL SERVICES',expiringSoon:'EXPIRING SOON',expiredAlert:'EXPIRED / ALERT',serviceName:'SERVICE NAME',type:'TYPE',nextDue:'NEXT DUE',uptime:'UPTIME',lastRenew:'LAST RENEW',cyclePeriod:'CYCLE',actions:'ACTIONS',cycle:'CYCLE',reset:'RESET',disabled:'DISABLED',days:'DAYS',daysUnit:'DAYS',typeReset:'RESET',typeCycle:'CYCLE',lunarCal:'Lunar',lbOffline:'OFFLINE',unit:{day:'DAY',month:'MTH',year:'YR'},editService:'EDIT SERVICE',newService:'NEW SERVICE',formName:'NAME',namePlaceholder:'e.g. Netflix',formType:'MODE',createDate:'CREATE DATE',interval:'INTERVAL',note:'NOTE',status:'STATUS',active:'ACTIVE',disabledText:'DISABLED',cancel:'CANCEL',save:'SAVE DATA',saveSettings:'SAVE CONFIG',settingsTitle:'SYSTEM CONFIG',setNotify:'NOTIFICATION',pushSwitch:'MASTER PUSH',pushUrl:'WEBHOOK URL',notifyThreshold:'ALERT THRESHOLD',setAuto:'AUTOMATION',autoRenewSwitch:'AUTO RENEW',autoRenewThreshold:'RENEW AFTER',autoDisableThreshold:'DISABLE AFTER',daysOverdue:'DAYS OVERDUE',sysLogs:'SYSTEM LOGS',execLogs:'EXECUTION LOGS',clearHistory:'CLEAR HISTORY',noLogs:'NO DATA',liveLog:'LIVE TERMINAL',btnExport: 'Export Data',btnImport: 'Import Data',btnTest: 'Send Test',batchDelete: 'Batch Delete',btnRefresh:'REFRESH',last12M:'LAST 12M',
             lblEnable: 'Enable', lblToken: 'Token', lblApiKey: 'API Key', lblChatId: 'Chat ID', 
             lblServer: 'Server URL', lblDevKey: 'Device Key', lblFrom: 'From Email', lblTo: 'To Email',
             lblTopic: 'Topic',readOnly: 'Read-only',
@@ -3094,13 +3026,55 @@ const HTML = `<!DOCTYPE html>
                     notifyConfig: { telegram: {}, bark: {}, pushplus: {}, notifyx: {}, resend: {}, webhook: {}, webhook2: {}, webhook3: {}, gotify: {}, ntfy: {} },
                     calendarToken: ''
                 });
-                const channelMap = reactive({ telegram:false, bark:false, pushplus:false, notifyx:false, resend:false, webhook:false, webhook2:false, webhook3:false, gotify:false, ntfy:false });
-                const testing = reactive({ telegram:false, bark:false, pushplus:false, notifyx:false, resend:false, webhook:false, webhook2:false, webhook3:false, gotify:false, ntfy:false });
-                const expandedChannels = ref('');
+                // 【修改点 6】删除旧的 channelMap 和 expandedChannels，保留 testing 并添加 dynamic 键
+                const testing = reactive({ telegram:false, bark:false, pushplus:false, notifyx:false, resend:false, webhook:false, webhook2:false, webhook3:false, gotify:false, ntfy:false, dynamic:false });
 
                 // Settings Accordion State
                 const settingsExpanded = reactive({ pref: false, notify: false, calendar: false, data: false });
                 const toggleSettingsSection = (k) => { settingsExpanded[k] = !settingsExpanded[k]; };
+
+                // 通知渠道对话框状态
+                const channelDialogVisible = ref(false);
+                const channelForm = ref({ id: '', type: 'telegram', name: '', config: {}, enabled: true });
+                const isChannelEdit = ref(false);
+                const channelSelection = ref([]);
+
+                // 渠道类型定义（包含字段模板）
+                const channelTypes = [
+                    { label: 'Telegram', value: 'telegram', fields: [
+                        {k:'token', l:'Token', p:'123456:ABC...'},
+                        {k:'chatId', l:'Chat ID', p:'-100xxx'}
+                    ]},
+                    { label: 'Bark', value: 'bark', fields: [
+                        {k:'server', l:'Server', p:'https://api.day.app'},
+                        {k:'key', l:'Device Key', p:''}
+                    ]},
+                    { label: 'Gotify', value: 'gotify', fields: [
+                        {k:'server', l:'Server', p:'https://gotify.example.com'},
+                        {k:'token', l:'Token', p:''}
+                    ]},
+                    { label: 'Ntfy', value: 'ntfy', fields: [
+                        {k:'server', l:'Server', p:'https://ntfy.sh'},
+                        {k:'topic', l:'Topic', p:''},
+                        {k:'token', l:'Token (Optional)', p:''}
+                    ]},
+                    { label: 'PushPlus', value: 'pushplus', fields: [
+                        {k:'token', l:'Token', p:''}
+                    ]},
+                    { label: 'NotifyX', value: 'notifyx', fields: [
+                        {k:'apiKey', l:'API Key', p:''}
+                    ]},
+                    { label: 'Resend', value: 'resend', fields: [
+                        {k:'apiKey', l:'API Key', p:''},
+                        {k:'from', l:'From Email', p:'onboarding@resend.dev'},
+                        {k:'to', l:'To Email', p:''}
+                    ]},
+                    { label: 'Custom Webhook', value: 'webhook', fields: [
+                        {k:'url', l:'URL', p:'https://...'},
+                        {k:'headers', l:'Headers (JSON)', p:'{"Auth":"..."}'},
+                        {k:'body', l:'Body Template', p:'{"msg":"{body}"}'}
+                    ]},
+                ];
 
                 // Dark Mode State
                 const isDark = ref(document.documentElement.classList.contains('dark'));
@@ -3865,15 +3839,41 @@ const HTML = `<!DOCTYPE html>
 
                 const openAdd = () => { isEdit.value=false; const d=getLocalToday(); form.value={id:Date.now().toString(),name:'',createDate:d,lastRenewDate:d,intervalDays:30,cycleUnit:'day',type:'cycle',enabled:true,tags:[],useLunar:false, notifyDays:3, notifyTime: '08:00', autoRenew:true, autoRenewDays:3, fixedPrice:0, currency:settings.value.defaultCurrency||'CNY', renewHistory:[]}; dialogVisible.value=true; };
                 const editItem = (row) => { isEdit.value=true; form.value={...row,cycleUnit:row.cycleUnit||'day',tags:[...(row.tags||[])],useLunar:!!row.useLunar, notifyDays:(row.notifyDays!==undefined?row.notifyDays:3), notifyTime: (row.notifyTime || '08:00'), autoRenew:row.autoRenew!==false, autoRenewDays:(row.autoRenewDays!==undefined?row.autoRenewDays:3)}; dialogVisible.value=true; };
-                const openSettings = () => { 
-                    settingsForm.value = JSON.parse(JSON.stringify(settings.value)); 
+                const openSettings = () => {
+                    settingsForm.value = JSON.parse(JSON.stringify(settings.value));
                     if (!settingsForm.value.upcomingBillsDays) settingsForm.value.upcomingBillsDays = 7;
-                    const chans = settingsForm.value.enabledChannels || [];
-                    Object.keys(channelMap).forEach(k => channelMap[k] = chans.includes(k));
-                    settingsVisible.value=true; 
+
+                    // 【修改点 5】数据迁移逻辑：将旧的 notifyConfig 转换为新的 notifyChannels
+                    if (!settingsForm.value.notifyChannels || settingsForm.value.notifyChannels.length === 0) {
+                        const chans = settingsForm.value.enabledChannels || [];
+                        const cfg = settingsForm.value.notifyConfig || {};
+                        const migrated = [];
+
+                        // 迁移标准渠道
+                        chans.forEach(type => {
+                            if (cfg[type]) {
+                                migrated.push({
+                                    id: Date.now().toString() + Math.random().toString().slice(2,6),
+                                    type: type,
+                                    name: type.charAt(0).toUpperCase() + type.slice(1) + ' (Migrated)',
+                                    config: cfg[type],
+                                    enabled: true
+                                });
+                            }
+                        });
+
+                        if (migrated.length > 0) {
+                            settingsForm.value.notifyChannels = migrated;
+                            ElMessage.success('Notification settings migrated to new system.');
+                        } else {
+                            settingsForm.value.notifyChannels = [];
+                        }
+                    }
+
+                    settingsVisible.value=true;
                 };
-                const saveSettings = async () => { 
-                    settingsForm.value.enabledChannels = Object.keys(channelMap).filter(k => channelMap[k]);
+                const saveSettings = async () => {
+                    // 【修改点 6】删除旧的 channelMap 逻辑，不再需要同步 enabledChannels
                     const oldCurrency = settings.value.defaultCurrency;
                     settings.value={...settingsForm.value}; 
                     await saveData(null,settings.value); 
@@ -3883,21 +3883,81 @@ const HTML = `<!DOCTYPE html>
                         fetchExchangeRates(settings.value.defaultCurrency);
                     }
                 };
-                const toggleChannel = (ch) => {};
+                // 【修改点 6】删除旧的 toggleChannel 和 testChannel 函数，已被 testDynamicChannel 替代
 
-                const testChannel = async (ch) => {
-                    testing[ch] = true;
+                // 渠道选择处理
+                const handleChannelSelection = (val) => {
+                    channelSelection.value = val;
+                };
+
+                // 打开添加渠道对话框
+                const openAddChannel = () => {
+                    isChannelEdit.value = false;
+                    channelForm.value = {
+                        id: Date.now().toString(),
+                        type: 'telegram',
+                        name: 'My Telegram',
+                        config: {},
+                        enabled: true
+                    };
+                    channelDialogVisible.value = true;
+                };
+
+                // 编辑渠道
+                const editChannel = (row) => {
+                    isChannelEdit.value = true;
+                    channelForm.value = JSON.parse(JSON.stringify(row)); // 深拷贝
+                    channelDialogVisible.value = true;
+                };
+
+                // 保存渠道
+                const saveChannel = () => {
+                    if(!channelForm.value.name) return ElMessage.error(t('msg.nameReq'));
+                    if(!settingsForm.value.notifyChannels) settingsForm.value.notifyChannels = [];
+
+                    const idx = settingsForm.value.notifyChannels.findIndex(c => c.id === channelForm.value.id);
+                    if (isChannelEdit.value && idx !== -1) {
+                        settingsForm.value.notifyChannels[idx] = {...channelForm.value};
+                    } else {
+                        settingsForm.value.notifyChannels.push({...channelForm.value});
+                    }
+                    channelDialogVisible.value = false;
+                };
+
+                // 删除单个渠道
+                const deleteChannel = (idx) => {
+                    settingsForm.value.notifyChannels.splice(idx, 1);
+                };
+
+                // 批量删除渠道
+                const batchDeleteChannels = () => {
+                    if (channelSelection.value.length === 0) return;
+                    ElMessageBox.confirm(
+                        t('msg.confirmDel'),
+                        t('tipDelete'),
+                        { type: 'warning' }
+                    ).then(() => {
+                        const ids = channelSelection.value.map(c => c.id);
+                        settingsForm.value.notifyChannels = settingsForm.value.notifyChannels.filter(c => !ids.includes(c.id));
+                        channelSelection.value = [];
+                    }).catch(()=>{});
+                };
+
+                // 测试动态渠道
+                const testDynamicChannel = async (row) => {
+                    if (!row.type) return;
+                    testing['dynamic'] = true;
                     try {
-                        const r = await fetch('/api/test-notify', { 
-                            method: 'POST', 
-                            headers: getAuth(), 
-                            body: JSON.stringify({ channel: ch, config: settingsForm.value.notifyConfig[ch] }) 
+                        const r = await fetch('/api/test-notify', {
+                            method: 'POST',
+                            headers: getAuth(),
+                            body: JSON.stringify({ channel: row.type, config: row.config })
                         });
                         const d = await r.json();
-                        if (r.ok) ElMessage.success(\`\${ch.toUpperCase()} TEST OK\`);
-                        else ElMessage.error(\`TEST FAIL: \${d.msg}\`);
+                        if (r.ok) ElMessage.success('TEST OK: ' + row.name);
+                        else ElMessage.error('TEST FAIL: ' + d.msg);
                     } catch(e) { ElMessage.error(e.message); }
-                    finally { testing[ch] = false; }
+                    finally { testing['dynamic'] = false; }
                 };
 
                 const calendarUrl = computed(() => {
@@ -4661,9 +4721,11 @@ const HTML = `<!DOCTYPE html>
                     expiringCount, expiredCount, currentTag, allTags, filteredList, upcomingBillsList, upcomingBillsTotal, searchKeyword, logVisible,formatLogTime,Upload, Download,
                     openAdd, editItem, deleteItem, saveItem, openSettings, saveSettings, runCheck, openHistoryLogs, clearLogs, toggleEnable,importRef, exportData, triggerImport, handleImportFile,
                     Edit, Delete, Plus, VideoPlay, Setting, Bell, Document, Lock, Monitor, SwitchButton, Calendar, Timer, Files, AlarmClock, Warning, Search, Cpu, Link, Connection, Message, Promotion, Iphone, Moon, Sunny, ArrowDown, Tickets,
-                    getDaysClass, formatDaysLeft, getTagClass, getLogColor, getLunarStr, getYearGanZhi, getSmartLunarText, getLunarTooltip, getMonthStr, getTagCount, tableRowClassName, channelMap, toggleChannel, testChannel, testing,
-                    expandedChannels,
+                    getDaysClass, formatDaysLeft, getTagClass, getLogColor, getLunarStr, getYearGanZhi, getSmartLunarText, getLunarTooltip, getMonthStr, getTagCount, tableRowClassName, testing,
+                    // 【修改点 6】删除旧的 channelMap, toggleChannel, testChannel, expandedChannels 导出
                     settingsExpanded, toggleSettingsSection,
+                    channelDialogVisible, channelForm, isChannelEdit, channelSelection, channelTypes,
+                    handleChannelSelection, openAddChannel, editChannel, saveChannel, deleteChannel, batchDeleteChannels, testDynamicChannel,
                     calendarUrl, copyIcsUrl, resetCalendarToken, migrateOldData, manualRenew,RefreshRight,timezoneList,currentPage, pageSize, pagedList, previewData,
                     isDark, toggleTheme, drawerSize, actionColWidth, paginationLayout, confirmDelete, confirmRenew, More, windowWidth,
                     handleSortChange, handleFilterChange, 
