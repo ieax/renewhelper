@@ -359,6 +359,7 @@ const DataStore = {
             jwtSecret: "",
             calendarToken: "",
             enabledChannels: [],
+            notifyTitle: "", // 新增：自定义通知标题
             notifyConfig: {
                 telegram: { token: "", chatId: "" },
                 bark: { server: "https://api.day.app", key: "" },
@@ -872,6 +873,8 @@ const I18N = {
         lblTo: "收件人",
         lblNotifyTime: "提醒时间",
         btnTest: "发送测试",
+        lblNotifyTitle: "通知标题", // 新增：通知标题标签
+        lblNotifyTitlePlaceholder: "留空使用默认标题", // 新增：通知标题占位符
     },
     en: {
         scan: "Scan %s items",
@@ -897,6 +900,8 @@ const I18N = {
         lblTo: "To Email",
         lblNotifyTime: "Alarm Time",
         btnTest: "Send Test",
+        lblNotifyTitle: "Notification Title", // 新增：通知标题标签
+        lblNotifyTitlePlaceholder: "Leave empty for default", // 新增：通知标题占位符
     },
 };
 function t(k, l, ...a) {
@@ -2742,6 +2747,19 @@ const HTML = `<!DOCTYPE html>
 
                             <!-- 通知渠道管理（表格 + 操作按钮） -->
                             <div v-if="settingsForm.enableNotify" class="flex flex-col gap-3">
+                                <!-- 新增：通知标题输入框 -->
+                                <div class="mb-4 p-3 bg-slate-50 dark:bg-slate-900 rounded border border-slate-100 dark:border-slate-800">
+                                    <div class="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2">{{ t('lblPushTitle') }}</div>
+                                    <el-input
+                                        v-model="settingsForm.notifyTitle"
+                                        :placeholder="t('lblNotifyTitlePlaceholder')"
+                                        clearable
+                                    ></el-input>
+                                    <div class="text-xs text-slate-500 mt-1">
+                                        {{ lang === 'zh' ? '默认: RenewHelper 报告' : 'Default: RenewHelper Report' }}
+                                    </div>
+                                </div>
+
                                 <!-- 操作按钮行 -->
                                 <div class="flex gap-2 mb-2">
                                     <el-button type="primary" :icon="Plus" class="flex-1 mecha-btn !bg-blue-600" @click="openAddChannel">{{ t('add') }}</el-button>
@@ -3111,7 +3129,7 @@ const HTML = `<!DOCTYPE html>
             lblNotifyTime: '提醒时间', btnResetToken: '重置令牌',
             lblHeaders: '请求头 (JSON)', lblBody: '消息体 (JSON)',
             tag:{alert:'触发提醒',renew:'自动续期',disable:'自动禁用',normal:'检查正常'},tagLatest:'最新',tagAuto:'自动',tagManual:'手动',msg:{confirmRenew: '确认将 [%s] 的更新日期设置为今天吗？',renewSuccess: '续期成功！日期已更新: %s -> %t',tokenReset: '令牌已重置，请更新订阅地址', copyOk: '链接已复制', exportSuccess: '备份已下载',importSuccess: '数据恢复成功，即将刷新',importFail: '导入失败，请检查文件格式',passReq:'请输入密码',saved:'保存成功',saveFail:'保存失败',cleared:'已清空',clearFail:'清空失败',loginFail:'验证失败',loadLogFail:'日志加载失败',confirmDel:'确认删除此项目?',dateError:'上次更新日期不能早于创建日期',nameReq:'服务名称不能为空',nameExist:'服务名称已存在',futureError:'上次续期不能是未来时间',serviceDisabled:'服务已停用',serviceEnabled:'服务已启用',execFinish: '执行完毕!',batchDeleteConfirm:'确认删除选中的 %n 个服务？',batchRenewConfirm:'确认为选中的 %n 个服务执行续期？',batchRenewSuccess:'批量续期成功！已更新 %n 个服务',batchDeleteSuccess:'已删除 %n 个服务',batchToggleSuccess:'已更新 %n 个服务状态'},tags:'标签',tagPlaceholder:'输入标签回车创建',searchPlaceholder:'搜索标题或备注...',tagsCol:'标签',tagAll:'全部',useLunar:'农历周期',lunarTip:'按农历日期计算周期',yes:'是',no:'否',timezone:'偏好时区',disabledFilter:'已停用',policyConfig:'自动化策略',policyNotify:'提醒提前期',policyAuto:'自动续期',policyRenewDay:'过期续期天数',useGlobal:'全局默认',autoRenewOnDesc:'过期自动续期',autoRenewOffDesc:'过期自动禁用',previewCalc:'根据上次续期日期和周期计算',nextDue:'下次到期',
-            fixedPrice:'账单额',currency:'币种',defaultCurrency:'默认币种',history:'历史记录',historyTitle:'续费历史',totalCost:'总花费',totalCount:'续费次数',renewDate:'操作日期',billPeriod:'账单周期',startDate:'开始日期',endDate:'结束日期',actualPrice:'实付金额',notePlaceholder:'可选备注...',btnAddHist:'补录历史',modify:'修改',confirmDelHist:'删除此记录?',opDate:'操作日',amount:'金额',period:'周期',spendingDashboard:'花销看板',monthlyBreakdown:'月度明细',total:'总计',count:'笔',growth:'环比',currMonth:'本月',avgMonthlyLabel:'月均支出',itemDetails:'项目明细',noData:'暂无数据',predictedTag:'预测',last12M:'最近12个月', lblPushTitle:'自定义标题', pushTitle:'RenewHelper 报告',
+            fixedPrice:'账单额',currency:'币种',defaultCurrency:'默认币种',history:'历史记录',historyTitle:'续费历史',totalCost:'总花费',totalCount:'续费次数',renewDate:'操作日期',billPeriod:'账单周期',startDate:'开始日期',endDate:'结束日期',actualPrice:'实付金额',notePlaceholder:'可选备注...',btnAddHist:'补录历史',modify:'修改',confirmDelHist:'删除此记录?',opDate:'操作日',amount:'金额',period:'周期',spendingDashboard:'花销看板',monthlyBreakdown:'月度明细',total:'总计',count:'笔',growth:'环比',currMonth:'本月',avgMonthlyLabel:'月均支出',itemDetails:'项目明细',noData:'暂无数据',predictedTag:'预测',last12M:'最近12个月', lblPushTitle:'自定义标题', pushTitle:'RenewHelper 报告', lblNotifyTitlePlaceholder:'留空使用默认标题',
             // 【修改点 10】添加服务级通知渠道配置相关的国际化文本
             notifyChannels:'通知渠道',channelsCol:'通知渠道',systemDefault:'系统默认',batchSetChannels:'设置通知渠道',channelDeleted:'(已删除)',emptyUsesAll:'留空则使用所有系统渠道',replaceMode:'替换',appendMode:'追加',
             // 【批量操作】添加批量操作相关的国际化文本
@@ -3123,7 +3141,7 @@ const HTML = `<!DOCTYPE html>
             lblNotifyTime: 'Alarm Time', btnResetToken: 'RESET TOKEN',
             lblHeaders: 'Headers (JSON)', lblBody: 'Body (JSON)',
             tag:{alert:'ALERT',renew:'RENEWED',disable:'DISABLED',normal:'NORMAL'},tagLatest:'LATEST',tagAuto:'AUTO',tagManual:'MANUAL',msg:{confirmRenew: 'Renew [%s] to today based on your timezone?',renewSuccess: 'Renewed! Date updated: %s -> %t',tokenReset: 'Token Reset. Update your calendar apps.', copyOk: 'Link Copied', exportSuccess: 'Backup Downloaded',importSuccess: 'Restore Success, Refreshing...',importFail: 'Import Failed, Check File Format',passReq:'Password Required',saved:'Data Saved',saveFail:'Save Failed',cleared:'Cleared',clearFail:'Clear Failed',loginFail:'Access Denied',loadLogFail:'Load Failed',confirmDel:'Confirm Delete?',dateError:'Last renew date cannot be earlier than create date',nameReq:'Name Required',nameExist:'Name already exists',futureError:'Renew date cannot be in the future',serviceDisabled:'Service Disabled',serviceEnabled:'Service Enabled',execFinish: 'EXECUTION FINISHED!',batchDeleteConfirm:'Delete %n selected services?',batchRenewConfirm:'Renew %n selected services?',batchRenewSuccess:'Batch renewed %n services!',batchDeleteSuccess:'Deleted %n services',batchToggleSuccess:'Updated %n services'},tags:'TAGS',tagPlaceholder:'Press Enter to create tag',searchPlaceholder:'Search...',tagsCol:'TAGS',tagAll:'ALL',useLunar:'Lunar Cycle',lunarTip:'Calculate based on Lunar calendar',yes:'Yes',no:'No',timezone:'Timezone',disabledFilter:'DISABLED',policyConfig:'Policy Config',policyNotify:'Notify Days',policyAuto:'Auto Renew',policyRenewDay:'Renew Days',useGlobal:'Global Default',autoRenewOnDesc:'Auto Renew when overdue',autoRenewOffDesc:'Auto Disable when overdue',previewCalc:'Based on Last Renew Date & Interval',nextDue:'NEXT DUE',
-            fixedPrice:'PRICE',currency:'Currency',defaultCurrency:'Default Currency',history:'History',historyTitle:'Renewal History',totalCost:'Total Cost',totalCount:'Total Count',renewDate:'Op Date',billPeriod:'Bill Period',startDate:'Start Date',endDate:'End Date',actualPrice:'Actual Price',notePlaceholder:'Optional note...',btnAddHist:'Add Record',modify:'Edit',confirmDelHist:'Delete record?',opDate:'Op Date',amount:'Amount',period:'Period',spendingDashboard:'SPENDING DASHBOARD',monthlyBreakdown:'MONTHLY BREAKDOWN',total:'TOTAL',count:'COUNT',growth:'GROWTH',currMonth:'CURRENT',itemDetails:'ITEMS',noData:'NO DATA',predictedTag:'PREDICTED', lblPushTitle:'Push Title', pushTitle:'RenewHelper Report',
+            fixedPrice:'PRICE',currency:'Currency',defaultCurrency:'Default Currency',history:'History',historyTitle:'Renewal History',totalCost:'Total Cost',totalCount:'Total Count',renewDate:'Op Date',billPeriod:'Bill Period',startDate:'Start Date',endDate:'End Date',actualPrice:'Actual Price',notePlaceholder:'Optional note...',btnAddHist:'Add Record',modify:'Edit',confirmDelHist:'Delete record?',opDate:'Op Date',amount:'Amount',period:'Period',spendingDashboard:'SPENDING DASHBOARD',monthlyBreakdown:'MONTHLY BREAKDOWN',total:'TOTAL',count:'COUNT',growth:'GROWTH',currMonth:'CURRENT',itemDetails:'ITEMS',noData:'NO DATA',predictedTag:'PREDICTED', lblPushTitle:'Push Title', pushTitle:'RenewHelper Report', lblNotifyTitlePlaceholder:'Leave empty for default',
             // 【修改点 10】添加服务级通知渠道配置相关的国际化文本
             notifyChannels:'Notify Channels',channelsCol:'Channels',systemDefault:'System Default',batchSetChannels:'Set Channels',channelDeleted:'(Deleted)',emptyUsesAll:'Empty = Use all system channels',replaceMode:'Replace',appendMode:'Append',
             // 【批量操作】添加批量操作相关的国际化文本
