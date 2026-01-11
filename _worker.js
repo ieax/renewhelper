@@ -1,11 +1,11 @@
 /**
- * Cloudflare Worker: RenewHelper (v2.0.20)
+ * Cloudflare Worker: RenewHelper (v2.0.21)
  * Author: LOSTFREE
- * Features: Multi-Channel Notify, Import/Export, Channel Test, Bilingual UI, Precise ICS Alarm，Bill Management.
+ * Features: Multi-Channel Notify, Import/Export, Channel Test, Bilingual UI, Precise ICS Alarm，Bill Management, Multiple Notify Times.
  * See CHANGELOG.md for history.
  */
 
-const APP_VERSION = "v2.0.20";
+const APP_VERSION = "v2.0.21";
 //接入免费汇率API
 const EXCHANGE_RATE_API_URL = 'https://api.frankfurter.dev/v1/latest?base=';
 
@@ -836,7 +836,8 @@ function calculateStatus(item, timezone = "UTC") {
         lastRenewDateLunar: lLast,
         tags: Array.isArray(item.tags) ? item.tags : [],
         useLunar: !!item.useLunar,
-        notifyTime: item.notifyTime || "08:00",
+        // 【修改点 7】状态计算：兼容字符串和数组格式
+        notifyTime: Array.isArray(item.notifyTime) ? item.notifyTime : (typeof item.notifyTime === 'string' ? [item.notifyTime] : ["08:00"]),
     };
 }
 
@@ -1082,13 +1083,21 @@ async function checkAndRenew(env, isSched, lang = "zh") {
 
             let shouldPush = true;
             if (isSched) {
-                // 定时任务运行时，检查是否到达指定的推送时间 (notifyTime)
-                const nTime = it.notifyTime || "08:00";
-                const [tgtH, tgtM] = nTime.split(":").map(Number);
-                const diffMinutes = Math.abs(nowH * 60 + nowM - (tgtH * 60 + tgtM));
+                // 【修改点 8】定时任务运行时，检查是否到达任意一个指定的推送时间 (notifyTime)
+                // 兼容字符串和数组格式
+                let times = it.notifyTime || "08:00";
+                if (typeof times === 'string') times = [times];
+                if (!Array.isArray(times)) times = ["08:00"];
+
+                // 检查是否有任意一个时间匹配当前时间窗口 (5分钟容差)
+                const match = times.some(tStr => {
+                    const [tgtH, tgtM] = tStr.split(":").map(Number);
+                    const diffMinutes = Math.abs(nowH * 60 + nowM - (tgtH * 60 + tgtM));
+                    return diffMinutes <= 5;
+                });
 
                 // 只有在设定时间前后 5分钟内才推送
-                if (diffMinutes > 5) {
+                if (!match) {
                     shouldPush = false;
                 }
             }
@@ -1303,7 +1312,8 @@ app.post(
                 tags: Array.isArray(i.tags) ? i.tags : [],
                 useLunar: !!i.useLunar,
                 notifyDays: i.notifyDays !== null ? Number(i.notifyDays) : null,
-                notifyTime: i.notifyTime || "08:00",
+                // 【修改点 6】数据清洗：兼容字符串和数组格式，统一转换为数组
+                notifyTime: Array.isArray(i.notifyTime) ? i.notifyTime : (typeof i.notifyTime === 'string' ? [i.notifyTime] : ["08:00"]),
                 autoRenew: i.autoRenew !== false,
                 autoRenewDays: i.autoRenewDays !== null ? Number(i.autoRenewDays) : null,
                 fixedPrice: Number(i.fixedPrice) || 0,
@@ -2492,9 +2502,12 @@ const HTML = `<!DOCTYPE html>
                     
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 border-t border-slate-100 pt-4">
                         <el-form-item :label="t('policyNotify')" class="!mb-0">
-                            <div class="flex gap-2">
-                                <el-input-number v-model="form.notifyDays" :min="0" controls-position="right" class="!w-24"></el-input-number>
-                                <el-time-select v-model="form.notifyTime" start="00:00" step="00:30" end="23:30" placeholder="08:00" class="!flex-1" :clearable="false"/>
+                            <div class="flex gap-2 w-full">
+                                <el-input-number v-model="form.notifyDays" :min="0" controls-position="right" class="!w-24 shrink-0"></el-input-number>
+                                <!-- 【修改点 3】从单选时间选择器改为多选下拉框，支持多个通知时间 -->
+                                <el-select v-model="form.notifyTime" multiple collapse-tags collapse-tags-tooltip placeholder="选择通知时间" style="width: 100%; min-width: 150px;" :max-collapse-tags="2">
+                                    <el-option v-for="t in timeOptions" :key="t" :label="t" :value="t" />
+                                </el-select>
                             </div>
                         </el-form-item>
                         <div class="flex items-end gap-3">
@@ -3013,7 +3026,19 @@ const HTML = `<!DOCTYPE html>
                 const selectedYear = ref('recent'); // 'recent' = last 12 months, or year number like 2024
                 const selectedMonth = ref(null); // selected month key like '2026-01' for detail view
                 const locale = ref(ZhCn), tableKey = ref(0), termRef = ref(null), submitting = ref(false);
-                const form = ref({ id:'', name:'', createDate:'', lastRenewDate:'', intervalDays:30, cycleUnit:'day', type:'cycle', message:'', enabled:true, tags:[], useLunar:false, notifyDays:3, notifyTime: '08:00', autoRenew:true, autoRenewDays:3, fixedPrice:0, currency:'CNY', renewHistory:[] });
+
+                // 【修改点 1】生成时间选项数组，支持多个通知时间
+                const timeOptions = [];
+                for(let h=0;h<24;h++){
+                    for(let m=0;m<60;m+=30){
+                        const hs = h.toString().padStart(2, '0');
+                        const ms = m.toString().padStart(2, '0');
+                        timeOptions.push(hs + ':' + ms);
+                    }
+                }
+
+                // 【修改点 2】notifyTime 从字符串改为数组，支持多个通知时间
+                const form = ref({ id:'', name:'', createDate:'', lastRenewDate:'', intervalDays:30, cycleUnit:'day', type:'cycle', message:'', enabled:true, tags:[], useLunar:false, notifyDays:3, notifyTime: ['08:00'], autoRenew:true, autoRenewDays:3, fixedPrice:0, currency:'CNY', renewHistory:[] });
                 const settingsForm = ref({ 
                     notifyUrl:'', 
                     enableNotify:true, 
@@ -3837,8 +3862,21 @@ const HTML = `<!DOCTYPE html>
                     } catch (e) { return isoStr; }
                 };                
 
-                const openAdd = () => { isEdit.value=false; const d=getLocalToday(); form.value={id:Date.now().toString(),name:'',createDate:d,lastRenewDate:d,intervalDays:30,cycleUnit:'day',type:'cycle',enabled:true,tags:[],useLunar:false, notifyDays:3, notifyTime: '08:00', autoRenew:true, autoRenewDays:3, fixedPrice:0, currency:settings.value.defaultCurrency||'CNY', renewHistory:[]}; dialogVisible.value=true; };
-                const editItem = (row) => { isEdit.value=true; form.value={...row,cycleUnit:row.cycleUnit||'day',tags:[...(row.tags||[])],useLunar:!!row.useLunar, notifyDays:(row.notifyDays!==undefined?row.notifyDays:3), notifyTime: (row.notifyTime || '08:00'), autoRenew:row.autoRenew!==false, autoRenewDays:(row.autoRenewDays!==undefined?row.autoRenewDays:3)}; dialogVisible.value=true; };
+                // 【修改点 4】新增服务时，notifyTime 使用数组格式
+                const openAdd = () => { isEdit.value=false; const d=getLocalToday(); form.value={id:Date.now().toString(),name:'',createDate:d,lastRenewDate:d,intervalDays:30,cycleUnit:'day',type:'cycle',enabled:true,tags:[],useLunar:false, notifyDays:3, notifyTime: ['08:00'], autoRenew:true, autoRenewDays:3, fixedPrice:0, currency:settings.value.defaultCurrency||'CNY', renewHistory:[]}; dialogVisible.value=true; };
+                // 【修改点 5】编辑服务时，兼容旧数据的字符串格式，自动转换为数组
+                const editItem = (row) => {
+                    isEdit.value=true;
+                    // 兼容处理：将字符串格式的 notifyTime 转换为数组
+                    let notifyTimeValue = row.notifyTime || '08:00';
+                    if (typeof notifyTimeValue === 'string') {
+                        notifyTimeValue = [notifyTimeValue];
+                    } else if (!Array.isArray(notifyTimeValue)) {
+                        notifyTimeValue = ['08:00'];
+                    }
+                    form.value={...row,cycleUnit:row.cycleUnit||'day',tags:[...(row.tags||[])],useLunar:!!row.useLunar, notifyDays:(row.notifyDays!==undefined?row.notifyDays:3), notifyTime: notifyTimeValue, autoRenew:row.autoRenew!==false, autoRenewDays:(row.autoRenewDays!==undefined?row.autoRenewDays:3)};
+                    dialogVisible.value=true;
+                };
                 const openSettings = () => {
                     settingsForm.value = JSON.parse(JSON.stringify(settings.value));
                     if (!settingsForm.value.upcomingBillsDays) settingsForm.value.upcomingBillsDays = 7;
@@ -4736,7 +4774,8 @@ const HTML = `<!DOCTYPE html>
                     historyDialogVisible, currentHistoryItem, historyPage, historyPageSize, pagedHistory, openHistory, saveHistoryInfo, addHistoryRecord, removeHistoryRecord, historyStats, exchangeRates, ratesLoading,
                     addHistoryDialogVisible, addHistoryForm, submitAddHistory,
                     editingHistoryIndex, tempHistoryItem, startEditHistory, saveEditHistory, cancelEditHistory, submitting, currentRenewItem,
-                    getSummaries, expiringTotal, expiredTotal, totalAmount
+                    getSummaries, expiringTotal, expiredTotal, totalAmount,
+                    timeOptions // 【修改点 9】导出 timeOptions 供模板使用
                 };
             }
         });
