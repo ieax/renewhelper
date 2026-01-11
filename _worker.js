@@ -1745,6 +1745,16 @@ const HTML = `<!DOCTYPE html>
         .notify-label { width: 90px; text-align: right; font-size: 12px; color: var(--text-dim); font-weight: 600; flex-shrink: 0; }
         
         [v-cloak] { display: none !important; }
+
+        /* Accordion Settings Styles */
+        .settings-accordion { display: flex; flex-direction: column; gap: 8px; }
+        .accordion-item { border: 1px solid var(--border); background: var(--bg-panel); border-radius: 4px; overflow: hidden; }
+        .accordion-header { padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; font-weight: 700; color: var(--text-dim); transition: all 0.2s; user-select: none; }
+        .accordion-header:hover { background: var(--bg-body); color: var(--text-main); }
+        .accordion-header.active { background: rgba(37, 99, 235, 0.1); color: #2563eb; }
+        .accordion-content { display: none; padding: 20px; border-top: 1px solid var(--border); background: var(--bg-body); }
+        .accordion-content.expanded { display: block; animation: slideIn 0.2s ease-out; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
@@ -2488,42 +2498,65 @@ const HTML = `<!DOCTYPE html>
                 </template>
             </el-dialog>
             
-            <el-dialog v-model="settingsVisible" :title="t('settingsTitle')" width="800px" align-center class="!rounded-none mecha-panel" style="clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);">
-                <el-form :model="settingsForm" label-position="left" label-width="120px">
-                    <h4 class="text-xs font-bold text-blue-600 mb-4 border-b border-gray-300 pb-2 uppercase">{{ t('secPref') }}</h4>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                        <el-form-item :label="t('timezone')">
-                            <el-select v-model="settingsForm.timezone" style="width:100%" filterable placeholder="Select Timezone">
-                                <el-option 
-                                    v-for="item in timezoneList" 
-                                    :key="item.value" 
-                                    :label="item.label" 
-                                    :value="item.value">
-                                </el-option>
-                            </el-select>
-                        </el-form-item>
-                        <el-form-item :label="t('defaultCurrency')">
-                            <el-select v-model="settingsForm.defaultCurrency" style="width:100%" filterable>
-                                <el-option v-for="c in currencyList" :key="c" :label="c" :value="c"></el-option>
-                            </el-select>
-                        </el-form-item>
-                        <el-form-item :label="t('autoDisableThreshold')"><el-input-number v-model="settingsForm.autoDisableDays" :min="1" :max="365" class="!w-full"></el-input-number></el-form-item>
-                        <el-form-item :label="t('upcomingBillsDays')"><el-input-number v-model="settingsForm.upcomingBillsDays" :min="1" :max="365" class="!w-full"></el-input-number></el-form-item>
-                    </div>
-
-                    <h4 class="text-xs font-bold text-blue-600 mb-4 mt-4 border-b border-gray-300 pb-2 uppercase">{{ t('secNotify') }}</h4>
-                    <div class="flex items-center gap-4 mb-4">
-                        <span class="text-sm font-bold text-slate-700">{{ t('pushSwitch') }}</span>
-                        <el-switch v-model="settingsForm.enableNotify" style="--el-switch-on-color:#2563eb;"></el-switch>
-                        <div v-if="settingsForm.enableNotify" class="ml-auto flex items-center gap-2">
-                            <span class="text-xs text-gray-500">{{ t('lblPushTitle') || 'Title' }}</span>
-                            <el-input v-model="settingsForm.notifyTitle" :placeholder="t('pushTitle')" size="small" class="!w-48"></el-input>
+            <el-dialog v-model="settingsVisible" :title="t('settingsTitle')" :width="windowWidth < 768 ? '95%' : '600px'" align-center class="!rounded-none mecha-panel">
+                <div class="settings-accordion">
+                    <!-- 1. PREFERENCES -->
+                    <div class="accordion-item">
+                        <div class="accordion-header" :class="{active:settingsExpanded.pref}" @click="toggleSettingsSection('pref')">
+                            <span class="flex items-center gap-2">
+                                <el-icon><Setting /></el-icon> {{ t('secPref') }}
+                            </span>
+                            <el-icon :style="{transform: settingsExpanded.pref ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s'}">
+                                <ArrowDown />
+                            </el-icon>
+                        </div>
+                        <div class="accordion-content" :class="{expanded:settingsExpanded.pref}">
+                            <el-form :model="settingsForm" label-position="top">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <el-form-item :label="t('timezone')">
+                                        <el-select v-model="settingsForm.timezone" style="width:100%" filterable placeholder="Select Timezone">
+                                            <el-option
+                                                v-for="item in timezoneList"
+                                                :key="item.value"
+                                                :label="item.label"
+                                                :value="item.value">
+                                            </el-option>
+                                        </el-select>
+                                    </el-form-item>
+                                    <el-form-item :label="t('defaultCurrency')">
+                                        <el-select v-model="settingsForm.defaultCurrency" style="width:100%" filterable>
+                                            <el-option v-for="c in currencyList" :key="c" :label="c" :value="c"></el-option>
+                                        </el-select>
+                                    </el-form-item>
+                                    <el-form-item :label="t('autoDisableThreshold')"><el-input-number v-model="settingsForm.autoDisableDays" :min="1" :max="365" class="!w-full"></el-input-number></el-form-item>
+                                    <el-form-item :label="t('upcomingBillsDays')"><el-input-number v-model="settingsForm.upcomingBillsDays" :min="1" :max="365" class="!w-full"></el-input-number></el-form-item>
+                                </div>
+                            </el-form>
                         </div>
                     </div>
-                    
-                    <div v-if="settingsForm.enableNotify">
-                    <div v-if="settingsForm.enableNotify">
-                        <el-collapse v-model="expandedChannels" accordion>
+
+                    <!-- 2. NOTIFICATIONS -->
+                    <div class="accordion-item">
+                        <div class="accordion-header" :class="{active:settingsExpanded.notify}" @click="toggleSettingsSection('notify')">
+                            <span class="flex items-center gap-2">
+                                <el-icon><Bell /></el-icon> {{ t('secNotify') }}
+                            </span>
+                            <el-icon :style="{transform: settingsExpanded.notify ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s'}">
+                                <ArrowDown />
+                            </el-icon>
+                        </div>
+                        <div class="accordion-content" :class="{expanded:settingsExpanded.notify}">
+                            <div class="flex items-center gap-4 mb-4">
+                                <span class="text-sm font-bold text-slate-700 dark:text-slate-200">{{ t('pushSwitch') }}</span>
+                                <el-switch v-model="settingsForm.enableNotify" style="--el-switch-on-color:#2563eb;"></el-switch>
+                                <div v-if="settingsForm.enableNotify" class="ml-auto flex items-center gap-2">
+                                    <span class="text-xs text-gray-500">{{ t('lblPushTitle') || 'Title' }}</span>
+                                    <el-input v-model="settingsForm.notifyTitle" :placeholder="t('pushTitle')" size="small" class="!w-48"></el-input>
+                                </div>
+                            </div>
+
+                            <div v-if="settingsForm.enableNotify">
+                                <el-collapse v-model="expandedChannels" accordion>
                             <!-- Telegram -->
                             <el-collapse-item name="telegram">
                                 <template #title>
@@ -2687,49 +2720,55 @@ const HTML = `<!DOCTYPE html>
                                 </div>
                             </el-collapse-item>
                         </el-collapse>
+                            </div>
+                        </div>
                     </div>
+
+                    <!-- 3. CALENDAR -->
+                    <div class="accordion-item">
+                        <div class="accordion-header" :class="{active:settingsExpanded.calendar}" @click="toggleSettingsSection('calendar')">
+                            <span class="flex items-center gap-2">
+                                <el-icon><Calendar /></el-icon> {{ t('lblIcsTitle') }}
+                            </span>
+                            <el-icon :style="{transform: settingsExpanded.calendar ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s'}">
+                                <ArrowDown />
+                            </el-icon>
+                        </div>
+                        <div class="accordion-content" :class="{expanded:settingsExpanded.calendar}">
+                            <div class="flex justify-between items-center bg-amber-50 dark:bg-amber-900/20 p-2 rounded border border-amber-100 dark:border-amber-900 mb-3">
+                                <span class="text-xs text-amber-700 dark:text-amber-500 font-bold">{{ t('lblIcsUrl') }}</span>
+                                <el-button type="primary" link size="small" @click="resetCalendarToken" :loading="loading">{{ t('btnResetToken') }}</el-button>
+                            </div>
+                            <div class="flex gap-2 w-full">
+                                <el-input v-model="calendarUrl" readonly id="icsUrlInput" class="flex-1"></el-input>
+                                <el-button class="mecha-btn !rounded-sm" @click="copyIcsUrl">{{ t('btnCopy') }}</el-button>
+                            </div>
+                        </div>
                     </div>
 
-					<h4 class="text-xs font-bold text-blue-600 mb-4 mt-8 border-b border-gray-300 pb-2">{{ t('lblIcsTitle') }}</h4>
-
-					<div class="mt-2">
-						<div class="flex justify-between items-center mb-2">
-							<span class="text-xs font-bold text-gray-500">{{ t('lblIcsUrl') }}</span>
-							<el-button 
-								type="primary" 
-								link 
-								size="small" 
-								@click="resetCalendarToken" 
-								:loading="loading">
-								{{ t('btnResetToken') }}
-							</el-button>
-						</div>
-
-						<div class="flex gap-2 w-full">
-							<el-input 
-								v-model="calendarUrl" 
-								readonly 
-								id="icsUrlInput" 
-								class="flex-1">
-							</el-input>
-							<el-button 
-								class="mecha-btn !rounded-sm" 
-								@click="copyIcsUrl">
-								{{ t('btnCopy') }}
-							</el-button>
-						</div>
-					</div>
-
-                    <h4 class="text-xs font-bold text-blue-600 mb-4 mt-8 border-b border-gray-300 pb-2 uppercase">{{ t('secData') }}</h4>
-                    <div class="flex gap-4 mb-4">
-                        <el-button type="success" plain :icon="Download" class="flex-1 mecha-btn" @click="exportData">{{ t('btnExport') }}</el-button>
-                        <el-button type="warning" plain :icon="Upload" class="flex-1 mecha-btn" @click="triggerImport">{{ t('btnImport') }}</el-button>
-                        <input type="file" ref="importRef" style="display:none" accept=".json" @change="handleImportFile">
+                    <!-- 4. DATA -->
+                    <div class="accordion-item">
+                        <div class="accordion-header" :class="{active:settingsExpanded.data}" @click="toggleSettingsSection('data')">
+                            <span class="flex items-center gap-2">
+                                <el-icon><Files /></el-icon> {{ t('secData') }}
+                            </span>
+                            <el-icon :style="{transform: settingsExpanded.data ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s'}">
+                                <ArrowDown />
+                            </el-icon>
+                        </div>
+                        <div class="accordion-content" :class="{expanded:settingsExpanded.data}">
+                            <div class="grid grid-cols-2 gap-4 mb-4">
+                                <el-button type="success" plain :icon="Download" class="w-full h-12 mecha-btn" @click="exportData">{{ t('btnExport') }}</el-button>
+                                <el-button type="warning" plain :icon="Upload" class="w-full h-12 mecha-btn" @click="triggerImport">{{ t('btnImport') }}</el-button>
+                                <input type="file" ref="importRef" style="display:none" accept=".json" @change="handleImportFile">
+                            </div>
+                            <el-button type="info" plain class="w-full mecha-btn" @click="migrateOldData">
+                                {{ lang === 'zh' ? '升级旧数据 (生成初始账单)' : 'Migrate Old Data (Generate Initial Bills)' }}
+                            </el-button>
+                        </div>
                     </div>
-                    <el-button type="info" plain class="w-full mecha-btn" @click="migrateOldData">
-                        {{ lang === 'zh' ? '升级旧数据 (生成初始账单)' : 'Migrate Old Data (Generate Initial Bills)' }}
-                    </el-button>
-                </el-form>
+                </div>
+
                 <template #footer><el-button @click="settingsVisible=false" size="large" class="mecha-btn">{{ t('cancel') }}</el-button><el-button type="primary" @click="saveSettings" size="large" class="mecha-btn !bg-blue-600">{{ t('saveSettings') }}</el-button></template>
             </el-dialog>
 
@@ -3058,7 +3097,11 @@ const HTML = `<!DOCTYPE html>
                 const channelMap = reactive({ telegram:false, bark:false, pushplus:false, notifyx:false, resend:false, webhook:false, webhook2:false, webhook3:false, gotify:false, ntfy:false });
                 const testing = reactive({ telegram:false, bark:false, pushplus:false, notifyx:false, resend:false, webhook:false, webhook2:false, webhook3:false, gotify:false, ntfy:false });
                 const expandedChannels = ref('');
-                
+
+                // Settings Accordion State
+                const settingsExpanded = reactive({ pref: false, notify: false, calendar: false, data: false });
+                const toggleSettingsSection = (k) => { settingsExpanded[k] = !settingsExpanded[k]; };
+
                 // Dark Mode State
                 const isDark = ref(document.documentElement.classList.contains('dark'));
                 const toggleTheme = () => {
@@ -4620,6 +4663,7 @@ const HTML = `<!DOCTYPE html>
                     Edit, Delete, Plus, VideoPlay, Setting, Bell, Document, Lock, Monitor, SwitchButton, Calendar, Timer, Files, AlarmClock, Warning, Search, Cpu, Link, Connection, Message, Promotion, Iphone, Moon, Sunny, ArrowDown, Tickets,
                     getDaysClass, formatDaysLeft, getTagClass, getLogColor, getLunarStr, getYearGanZhi, getSmartLunarText, getLunarTooltip, getMonthStr, getTagCount, tableRowClassName, channelMap, toggleChannel, testChannel, testing,
                     expandedChannels,
+                    settingsExpanded, toggleSettingsSection,
                     calendarUrl, copyIcsUrl, resetCalendarToken, migrateOldData, manualRenew,RefreshRight,timezoneList,currentPage, pageSize, pagedList, previewData,
                     isDark, toggleTheme, drawerSize, actionColWidth, paginationLayout, confirmDelete, confirmRenew, More, windowWidth,
                     handleSortChange, handleFilterChange, 
