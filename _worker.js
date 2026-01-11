@@ -1,11 +1,11 @@
 /**
- * Cloudflare Worker: RenewHelper (v2.0.21)
+ * Cloudflare Worker: RenewHelper (v2.0.23)
  * Author: LOSTFREE
- * Features: Multi-Channel Notify, Import/Export, Channel Test, Bilingual UI, Precise ICS Alarm，Bill Management, Multiple Notify Times.
+ * Features: Multi-Channel Notify, Import/Export, Channel Test, Bilingual UI, Precise ICS Alarm，Bill Management, Multiple Notify Times, Service-Level Notify Channels, Batch Operations.
  * See CHANGELOG.md for history.
  */
 
-const APP_VERSION = "v2.0.21";
+const APP_VERSION = "v2.0.23";
 //接入免费汇率API
 const EXCHANGE_RATE_API_URL = 'https://api.frankfurter.dev/v1/latest?base=';
 
@@ -561,7 +561,8 @@ const escapeHtml = (unsafe) => {
 };
 
 const Notifier = {
-    async send(settings, title, body) {
+    // 【修改点 9】添加 channelIds 参数，支持服务级通知渠道配置
+    async send(settings, title, body, channelIds = null) {
         if (!settings.enableNotify) return "NOTIFY_DISABLED";
 
         const tasks = [];
@@ -571,6 +572,11 @@ const Notifier = {
         if (dynamicChannels.length > 0) {
             for (const ch of dynamicChannels) {
                 if (!ch.enabled) continue; // 跳过禁用的渠道
+
+                // 【修改点 9】如果指定了 channelIds，只发送匹配的渠道
+                if (channelIds && channelIds.length > 0) {
+                    if (!channelIds.includes(ch.id)) continue;
+                }
 
                 // ch = { type, config, name, enabled, ... }
                 if (this.adapters[ch.type]) {
@@ -1154,8 +1160,19 @@ async function checkAndRenew(env, isSched, lang = "zh") {
         }
 
         if (pushBody.length > 0) {
+            // 【修改点 8】收集所有触发服务的通知渠道（取并集）
+            const allChannelIds = new Set();
+            [...dis, ...upd, ...trig].forEach(item => {
+                if (item.notifyChannels && Array.isArray(item.notifyChannels) && item.notifyChannels.length > 0) {
+                    item.notifyChannels.forEach(id => allChannelIds.add(id));
+                }
+            });
+
+            // 如果所有服务都没有特定渠道，传 null 使用全局默认
+            const channelIds = allChannelIds.size > 0 ? Array.from(allChannelIds) : null;
+
             const fullBody = pushBody.join("\n").trim();
-            const pushRes = await Notifier.send(s, s.notifyTitle || t("pushTitle", lang), fullBody);
+            const pushRes = await Notifier.send(s, s.notifyTitle || t("pushTitle", lang), fullBody, channelIds);
             log(`[PUSH] ${pushRes}`);
         }
     }
@@ -1319,6 +1336,8 @@ app.post(
                 fixedPrice: Number(i.fixedPrice) || 0,
                 currency: i.currency || 'CNY',
                 renewHistory: Array.isArray(i.renewHistory) ? i.renewHistory : [],
+                // 【修改点 1】数据清洗：添加 notifyChannels 字段处理，兼容旧数据
+                notifyChannels: Array.isArray(i.notifyChannels) ? i.notifyChannels : [],
             };
 
             // 【核心修复】在保存前，使用后端逻辑重新计算 nextDueDate 等字段
@@ -1787,6 +1806,28 @@ const HTML = `<!DOCTYPE html>
         .accordion-content { display: none; padding: 20px; border-top: 1px solid var(--border); background: var(--bg-body); }
         .accordion-content.expanded { display: block; animation: slideIn 0.2s ease-out; }
         @keyframes slideIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* 【批量操作】批量操作栏样式 */
+        .batch-action-bar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; margin-bottom: 12px; background: linear-gradient(135deg, rgba(30, 58, 95, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%); border: 1px solid #334155; flex-wrap: wrap; }
+        .batch-action-bar .batch-count { color: #22d3ee; font-size: 14px; font-weight: bold; font-family: 'JetBrains Mono', monospace; }
+        html.dark .batch-action-bar { background: linear-gradient(135deg, rgba(30, 58, 95, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%); }
+
+        /* 【批量操作】暗黑模式下增强选择框可见性 */
+        html.dark .el-table .el-checkbox__inner {
+            background-color: #1e293b !important;
+            border: 2px solid #3b82f6 !important;
+        }
+        html.dark .el-table .el-checkbox__input.is-checked .el-checkbox__inner {
+            background-color: #3b82f6 !important;
+            border-color: #3b82f6 !important;
+        }
+        html.dark .el-table .el-checkbox__input.is-indeterminate .el-checkbox__inner {
+            background-color: #3b82f6 !important;
+            border-color: #3b82f6 !important;
+        }
+        html.dark .el-table .el-checkbox__inner:hover {
+            border-color: #60a5fa !important;
+        }
     </style>
 </head>
 <body>
@@ -1912,8 +1953,22 @@ const HTML = `<!DOCTYPE html>
                     <div class="hud-text">MONITORING // TAG: <span class="hud-accent" style="color:#22d3ee">{{ currentTag }}</span></div>
                     <div class="hud-bar-container"><div class="hud-text" style="margin-right:12px;color:#94a3b8">MATCHED: <span class="text-white text-lg mx-1">{{ filteredList.length }}</span></div><div class="hud-bar" style="animation-delay:0s"></div><div class="hud-bar" style="animation-delay:0.1s"></div><div class="hud-bar" style="animation-delay:0.2s"></div><div class="hud-bar" style="animation-delay:0.3s"></div><div class="hud-bar" style="animation-delay:0.4s"></div></div>
                 </div>
+
+                <!-- 【批量操作】批量操作栏 UI -->
+                <div v-if="selectedRows.length > 0" class="batch-action-bar">
+                    <span class="batch-count">{{ t('batchSelected') }} {{ selectedRows.length }} {{ t('batchItems') }}</span>
+                    <el-button class="mecha-btn !bg-emerald-600 !text-white" size="small" :icon="RefreshRight" @click="batchRenew">{{ t('batchRenew') }}</el-button>
+                    <el-button class="mecha-btn !bg-amber-600 !text-white" size="small" :icon="Warning" @click="batchToggle(false)">{{ t('batchPause') }}</el-button>
+                    <el-button class="mecha-btn !bg-blue-600 !text-white" size="small" :icon="VideoPlay" @click="batchToggle(true)">{{ t('batchEnable') }}</el-button>
+                    <el-button class="mecha-btn !bg-purple-600 !text-white" size="small" :icon="Bell" @click="batchSetChannels">{{ t('batchSetChannels') }}</el-button>
+                    <el-button class="mecha-btn !bg-red-600 !text-white" size="small" :icon="Delete" @click="batchDelete">{{ t('batchDelete') }}</el-button>
+                    <el-button class="mecha-btn" size="small" @click="clearSelection">{{ t('batchCancel') }}</el-button>
+                </div>
+
   <div class="mecha-panel p-1 !border-l-0">
-    <el-table :key="tableKey" :data="pagedList" style="width:100%" v-loading="loading" :row-class-name="tableRowClassName" size="large" @sort-change="handleSortChange" @filter-change="handleFilterChange" :default-sort="{prop: 'daysLeft', order: 'ascending'}" show-summary :summary-method="getSummaries">       
+    <el-table ref="tableRef" :key="tableKey" :data="pagedList" style="width:100%" v-loading="loading" :row-class-name="tableRowClassName" size="large" @sort-change="handleSortChange" @filter-change="handleFilterChange" @selection-change="handleSelectionChange" :default-sort="{prop: 'daysLeft', order: 'ascending'}" show-summary :summary-method="getSummaries">
+        <!-- 【批量操作】选择列 -->
+        <el-table-column type="selection" width="45"></el-table-column>
         <el-table-column :label="t('serviceName')" min-width="230">
             <template #default="scope">
                 <div class="flex items-center gap-4">
@@ -1929,6 +1984,29 @@ const HTML = `<!DOCTYPE html>
         <el-table-column :label="t('tagsCol')" min-width="120">
             <template #default="scope">
                 <div class="tag-container"><span v-for="tag in scope.row.tags" :key="tag" class="tag-compact">{{ tag }}</span></div>
+            </template>
+        </el-table-column>
+
+        <!-- 【修改点 7】添加通知渠道列 -->
+        <el-table-column :label="t('channelsCol')" min-width="150">
+            <template #default="scope">
+                <div v-if="scope.row.notifyChannels && scope.row.notifyChannels.length > 0" class="flex flex-wrap gap-1">
+                    <el-tag
+                        v-for="chId in scope.row.notifyChannels.slice(0, 3)"
+                        :key="chId"
+                        size="small"
+                        effect="plain"
+                        class="text-xs"
+                    >
+                        {{ getChannelName(chId) }}
+                    </el-tag>
+                    <el-tag v-if="scope.row.notifyChannels.length > 3" size="small" type="info">
+                        +{{ scope.row.notifyChannels.length - 3 }}
+                    </el-tag>
+                </div>
+                <span v-else class="text-xs text-slate-400">
+                    {{ t('systemDefault') }}
+                </span>
             </template>
         </el-table-column>
 
@@ -2516,6 +2594,35 @@ const HTML = `<!DOCTYPE html>
                         </div>
                     </div>
 
+                    <!-- 【修改点 6】添加服务级通知渠道选择器 -->
+                    <el-form-item :label="t('notifyChannels')" class="!mb-4">
+                        <el-select
+                            v-model="form.notifyChannels"
+                            multiple
+                            collapse-tags
+                            collapse-tags-tooltip
+                            :placeholder="t('emptyUsesAll')"
+                            style="width: 100%"
+                            :max-collapse-tags="2"
+                            clearable
+                        >
+                            <el-option
+                                v-for="ch in enabledChannels"
+                                :key="ch.id"
+                                :label="ch.name"
+                                :value="ch.id"
+                            >
+                                <span style="float: left">{{ ch.name }}</span>
+                                <span style="float: right; color: var(--el-text-color-secondary); font-size: 12px">
+                                    {{ ch.type }}
+                                </span>
+                            </el-option>
+                        </el-select>
+                        <div class="text-xs text-slate-400 mt-1">
+                            {{ t('emptyUsesAll') }}
+                        </div>
+                    </el-form-item>
+
                     <el-form-item :label="t('note')"><el-input v-model="form.message" type="textarea" rows="2"></el-input></el-form-item>
                 </el-form>
                 
@@ -2532,7 +2639,50 @@ const HTML = `<!DOCTYPE html>
                     </div>
                 </template>
             </el-dialog>
-            
+
+            <!-- 【批量操作】批量设置通知渠道对话框 -->
+            <el-dialog
+                v-model="batchChannelDialogVisible"
+                :title="t('batchSetChannels')"
+                width="500px"
+                align-center
+                class="mecha-panel"
+            >
+                <div class="mb-4 text-sm text-slate-500">
+                    {{ lang === 'zh' ? '将为选中的 ' : 'Setting channels for ' }}
+                    <span class="font-bold text-blue-600">{{ selectedRows.length }}</span>
+                    {{ lang === 'zh' ? ' 个服务设置通知渠道' : ' services' }}
+                </div>
+
+                <el-radio-group v-model="batchChannelMode" class="mb-4">
+                    <el-radio label="replace">{{ t('replaceMode') }}</el-radio>
+                    <el-radio label="append">{{ t('appendMode') }}</el-radio>
+                </el-radio-group>
+
+                <el-select
+                    v-model="batchChannelSelection"
+                    multiple
+                    :placeholder="t('notifyChannels')"
+                    style="width: 100%"
+                >
+                    <el-option
+                        v-for="ch in enabledChannels"
+                        :key="ch.id"
+                        :label="ch.name"
+                        :value="ch.id"
+                    />
+                </el-select>
+
+                <div class="mt-3 text-xs text-amber-600">
+                    {{ t('emptyUsesAll') }}
+                </div>
+
+                <template #footer>
+                    <el-button @click="batchChannelDialogVisible = false">{{ t('cancel') }}</el-button>
+                    <el-button type="primary" @click="confirmBatchSetChannels">{{ t('save') }}</el-button>
+                </template>
+            </el-dialog>
+
             <el-dialog v-model="settingsVisible" :title="t('settingsTitle')" :width="windowWidth < 768 ? '95%' : '600px'" align-center class="!rounded-none mecha-panel">
                 <div class="settings-accordion">
                     <!-- 1. PREFERENCES -->
@@ -2960,16 +3110,24 @@ const HTML = `<!DOCTYPE html>
             lblTopic: '主题 (Topic)',readOnly: '只读',
             lblNotifyTime: '提醒时间', btnResetToken: '重置令牌',
             lblHeaders: '请求头 (JSON)', lblBody: '消息体 (JSON)',
-            tag:{alert:'触发提醒',renew:'自动续期',disable:'自动禁用',normal:'检查正常'},tagLatest:'最新',tagAuto:'自动',tagManual:'手动',msg:{confirmRenew: '确认将 [%s] 的更新日期设置为今天吗？',renewSuccess: '续期成功！日期已更新: %s -> %t',tokenReset: '令牌已重置，请更新订阅地址', copyOk: '链接已复制', exportSuccess: '备份已下载',importSuccess: '数据恢复成功，即将刷新',importFail: '导入失败，请检查文件格式',passReq:'请输入密码',saved:'保存成功',saveFail:'保存失败',cleared:'已清空',clearFail:'清空失败',loginFail:'验证失败',loadLogFail:'日志加载失败',confirmDel:'确认删除此项目?',dateError:'上次更新日期不能早于创建日期',nameReq:'服务名称不能为空',nameExist:'服务名称已存在',futureError:'上次续期不能是未来时间',serviceDisabled:'服务已停用',serviceEnabled:'服务已启用',execFinish: '执行完毕!'},tags:'标签',tagPlaceholder:'输入标签回车创建',searchPlaceholder:'搜索标题或备注...',tagsCol:'标签',tagAll:'全部',useLunar:'农历周期',lunarTip:'按农历日期计算周期',yes:'是',no:'否',timezone:'偏好时区',disabledFilter:'已停用',policyConfig:'自动化策略',policyNotify:'提醒提前期',policyAuto:'自动续期',policyRenewDay:'过期续期天数',useGlobal:'全局默认',autoRenewOnDesc:'过期自动续期',autoRenewOffDesc:'过期自动禁用',previewCalc:'根据上次续期日期和周期计算',nextDue:'下次到期',
-            fixedPrice:'账单额',currency:'币种',defaultCurrency:'默认币种',history:'历史记录',historyTitle:'续费历史',totalCost:'总花费',totalCount:'续费次数',renewDate:'操作日期',billPeriod:'账单周期',startDate:'开始日期',endDate:'结束日期',actualPrice:'实付金额',notePlaceholder:'可选备注...',btnAddHist:'补录历史',modify:'修改',confirmDelHist:'删除此记录?',opDate:'操作日',amount:'金额',period:'周期',spendingDashboard:'花销看板',monthlyBreakdown:'月度明细',total:'总计',count:'笔',growth:'环比',currMonth:'本月',avgMonthlyLabel:'月均支出',itemDetails:'项目明细',noData:'暂无数据',predictedTag:'预测',last12M:'最近12个月', lblPushTitle:'自定义标题', pushTitle:'RenewHelper 报告'},
+            tag:{alert:'触发提醒',renew:'自动续期',disable:'自动禁用',normal:'检查正常'},tagLatest:'最新',tagAuto:'自动',tagManual:'手动',msg:{confirmRenew: '确认将 [%s] 的更新日期设置为今天吗？',renewSuccess: '续期成功！日期已更新: %s -> %t',tokenReset: '令牌已重置，请更新订阅地址', copyOk: '链接已复制', exportSuccess: '备份已下载',importSuccess: '数据恢复成功，即将刷新',importFail: '导入失败，请检查文件格式',passReq:'请输入密码',saved:'保存成功',saveFail:'保存失败',cleared:'已清空',clearFail:'清空失败',loginFail:'验证失败',loadLogFail:'日志加载失败',confirmDel:'确认删除此项目?',dateError:'上次更新日期不能早于创建日期',nameReq:'服务名称不能为空',nameExist:'服务名称已存在',futureError:'上次续期不能是未来时间',serviceDisabled:'服务已停用',serviceEnabled:'服务已启用',execFinish: '执行完毕!',batchDeleteConfirm:'确认删除选中的 %n 个服务？',batchRenewConfirm:'确认为选中的 %n 个服务执行续期？',batchRenewSuccess:'批量续期成功！已更新 %n 个服务',batchDeleteSuccess:'已删除 %n 个服务',batchToggleSuccess:'已更新 %n 个服务状态'},tags:'标签',tagPlaceholder:'输入标签回车创建',searchPlaceholder:'搜索标题或备注...',tagsCol:'标签',tagAll:'全部',useLunar:'农历周期',lunarTip:'按农历日期计算周期',yes:'是',no:'否',timezone:'偏好时区',disabledFilter:'已停用',policyConfig:'自动化策略',policyNotify:'提醒提前期',policyAuto:'自动续期',policyRenewDay:'过期续期天数',useGlobal:'全局默认',autoRenewOnDesc:'过期自动续期',autoRenewOffDesc:'过期自动禁用',previewCalc:'根据上次续期日期和周期计算',nextDue:'下次到期',
+            fixedPrice:'账单额',currency:'币种',defaultCurrency:'默认币种',history:'历史记录',historyTitle:'续费历史',totalCost:'总花费',totalCount:'续费次数',renewDate:'操作日期',billPeriod:'账单周期',startDate:'开始日期',endDate:'结束日期',actualPrice:'实付金额',notePlaceholder:'可选备注...',btnAddHist:'补录历史',modify:'修改',confirmDelHist:'删除此记录?',opDate:'操作日',amount:'金额',period:'周期',spendingDashboard:'花销看板',monthlyBreakdown:'月度明细',total:'总计',count:'笔',growth:'环比',currMonth:'本月',avgMonthlyLabel:'月均支出',itemDetails:'项目明细',noData:'暂无数据',predictedTag:'预测',last12M:'最近12个月', lblPushTitle:'自定义标题', pushTitle:'RenewHelper 报告',
+            // 【修改点 10】添加服务级通知渠道配置相关的国际化文本
+            notifyChannels:'通知渠道',channelsCol:'通知渠道',systemDefault:'系统默认',batchSetChannels:'设置通知渠道',channelDeleted:'(已删除)',emptyUsesAll:'留空则使用所有系统渠道',replaceMode:'替换',appendMode:'追加',
+            // 【批量操作】添加批量操作相关的国际化文本
+            batchSelected:'已选择',batchItems:'项',batchRenew:'批量续费',batchPause:'批量暂停',batchEnable:'批量启用',batchCancel:'取消选择'},
             en: { upcomingBillsDays:'Pending Reminder', upcomingBills: '%s Days Pending', viewSwitch:'VIEW SWITCH',viewProjects:'PROJECTS',viewSpending:'DASHBOARD',annualSummary:'Annual Summary',monthlyTrend:'Monthly Trend',noSpendingData:'No Spending Data',billAmount:'BILL AMOUNT',opSpending:'ACTUAL COST', avgMonthly:'AVG', avgMonthlyLabel:'AVG MONTHLY', filter:{expired:'Overdue/Today', w7:'Within %s Days', w30:'Within 30 Days', future:'Future(>30d)', new:'New (<30d)', stable:'Stable (1m-1y)', long:'Long Term (>1y)', m1:'Last Month', m6:'Last 6 Months', year:'This Year', earlier:'Earlier'}, secPref: 'PREFERENCES',manualRenew: 'Quick Renew',tipToggle: 'Toggle Status',tipRenew: 'Quick Renew',tipEdit: 'Edit Service',tipDelete: 'Delete Service',secNotify: 'NOTIFICATIONS',secData: 'DATA MANAGEMENT',lblIcsTitle: 'CALENDAR SUBSCRIPTION',lblIcsUrl: 'ICS URL (iOS/Google Calendar)',btnCopy: 'COPY',btnResetToken: 'RESET TOKEN',loginTitle:'SYSTEM ACCESS',passwordPlaceholder:'Authorization Key',unlockBtn:'UNLOCK TERMINAL',check:'CHECK',add:'ADD NEW',settings:'CONFIG',logs:'LOGS',logout:'LOGOUT',totalServices:'TOTAL SERVICES',expiringSoon:'EXPIRING SOON',expiredAlert:'EXPIRED / ALERT',serviceName:'SERVICE NAME',type:'TYPE',nextDue:'NEXT DUE',uptime:'UPTIME',lastRenew:'LAST RENEW',cyclePeriod:'CYCLE',actions:'ACTIONS',cycle:'CYCLE',reset:'RESET',disabled:'DISABLED',days:'DAYS',daysUnit:'DAYS',typeReset:'RESET',typeCycle:'CYCLE',lunarCal:'Lunar',lbOffline:'OFFLINE',unit:{day:'DAY',month:'MTH',year:'YR'},editService:'EDIT SERVICE',newService:'NEW SERVICE',formName:'NAME',namePlaceholder:'e.g. Netflix',formType:'MODE',createDate:'CREATE DATE',interval:'INTERVAL',note:'NOTE',status:'STATUS',active:'ACTIVE',disabledText:'DISABLED',cancel:'CANCEL',save:'SAVE DATA',saveSettings:'SAVE CONFIG',settingsTitle:'SYSTEM CONFIG',setNotify:'NOTIFICATION',pushSwitch:'MASTER PUSH',pushUrl:'WEBHOOK URL',notifyThreshold:'ALERT THRESHOLD',setAuto:'AUTOMATION',autoRenewSwitch:'AUTO RENEW',autoRenewThreshold:'RENEW AFTER',autoDisableThreshold:'DISABLE AFTER',daysOverdue:'DAYS OVERDUE',sysLogs:'SYSTEM LOGS',execLogs:'EXECUTION LOGS',clearHistory:'CLEAR HISTORY',noLogs:'NO DATA',liveLog:'LIVE TERMINAL',btnExport: 'Export Data',btnImport: 'Import Data',btnTest: 'Send Test',batchDelete: 'Batch Delete',btnRefresh:'REFRESH',last12M:'LAST 12M',
             lblEnable: 'Enable', lblToken: 'Token', lblApiKey: 'API Key', lblChatId: 'Chat ID', 
             lblServer: 'Server URL', lblDevKey: 'Device Key', lblFrom: 'From Email', lblTo: 'To Email',
             lblTopic: 'Topic',readOnly: 'Read-only',
             lblNotifyTime: 'Alarm Time', btnResetToken: 'RESET TOKEN',
             lblHeaders: 'Headers (JSON)', lblBody: 'Body (JSON)',
-            tag:{alert:'ALERT',renew:'RENEWED',disable:'DISABLED',normal:'NORMAL'},tagLatest:'LATEST',tagAuto:'AUTO',tagManual:'MANUAL',msg:{confirmRenew: 'Renew [%s] to today based on your timezone?',renewSuccess: 'Renewed! Date updated: %s -> %t',tokenReset: 'Token Reset. Update your calendar apps.', copyOk: 'Link Copied', exportSuccess: 'Backup Downloaded',importSuccess: 'Restore Success, Refreshing...',importFail: 'Import Failed, Check File Format',passReq:'Password Required',saved:'Data Saved',saveFail:'Save Failed',cleared:'Cleared',clearFail:'Clear Failed',loginFail:'Access Denied',loadLogFail:'Load Failed',confirmDel:'Confirm Delete?',dateError:'Last renew date cannot be earlier than create date',nameReq:'Name Required',nameExist:'Name already exists',futureError:'Renew date cannot be in the future',serviceDisabled:'Service Disabled',serviceEnabled:'Service Enabled',execFinish: 'EXECUTION FINISHED!'},tags:'TAGS',tagPlaceholder:'Press Enter to create tag',searchPlaceholder:'Search...',tagsCol:'TAGS',tagAll:'ALL',useLunar:'Lunar Cycle',lunarTip:'Calculate based on Lunar calendar',yes:'Yes',no:'No',timezone:'Timezone',disabledFilter:'DISABLED',policyConfig:'Policy Config',policyNotify:'Notify Days',policyAuto:'Auto Renew',policyRenewDay:'Renew Days',useGlobal:'Global Default',autoRenewOnDesc:'Auto Renew when overdue',autoRenewOffDesc:'Auto Disable when overdue',previewCalc:'Based on Last Renew Date & Interval',nextDue:'NEXT DUE',
-            fixedPrice:'PRICE',currency:'Currency',defaultCurrency:'Default Currency',history:'History',historyTitle:'Renewal History',totalCost:'Total Cost',totalCount:'Total Count',renewDate:'Op Date',billPeriod:'Bill Period',startDate:'Start Date',endDate:'End Date',actualPrice:'Actual Price',notePlaceholder:'Optional note...',btnAddHist:'Add Record',modify:'Edit',confirmDelHist:'Delete record?',opDate:'Op Date',amount:'Amount',period:'Period',spendingDashboard:'SPENDING DASHBOARD',monthlyBreakdown:'MONTHLY BREAKDOWN',total:'TOTAL',count:'COUNT',growth:'GROWTH',currMonth:'CURRENT',itemDetails:'ITEMS',noData:'NO DATA',predictedTag:'PREDICTED', lblPushTitle:'Push Title', pushTitle:'RenewHelper Report'}
+            tag:{alert:'ALERT',renew:'RENEWED',disable:'DISABLED',normal:'NORMAL'},tagLatest:'LATEST',tagAuto:'AUTO',tagManual:'MANUAL',msg:{confirmRenew: 'Renew [%s] to today based on your timezone?',renewSuccess: 'Renewed! Date updated: %s -> %t',tokenReset: 'Token Reset. Update your calendar apps.', copyOk: 'Link Copied', exportSuccess: 'Backup Downloaded',importSuccess: 'Restore Success, Refreshing...',importFail: 'Import Failed, Check File Format',passReq:'Password Required',saved:'Data Saved',saveFail:'Save Failed',cleared:'Cleared',clearFail:'Clear Failed',loginFail:'Access Denied',loadLogFail:'Load Failed',confirmDel:'Confirm Delete?',dateError:'Last renew date cannot be earlier than create date',nameReq:'Name Required',nameExist:'Name already exists',futureError:'Renew date cannot be in the future',serviceDisabled:'Service Disabled',serviceEnabled:'Service Enabled',execFinish: 'EXECUTION FINISHED!',batchDeleteConfirm:'Delete %n selected services?',batchRenewConfirm:'Renew %n selected services?',batchRenewSuccess:'Batch renewed %n services!',batchDeleteSuccess:'Deleted %n services',batchToggleSuccess:'Updated %n services'},tags:'TAGS',tagPlaceholder:'Press Enter to create tag',searchPlaceholder:'Search...',tagsCol:'TAGS',tagAll:'ALL',useLunar:'Lunar Cycle',lunarTip:'Calculate based on Lunar calendar',yes:'Yes',no:'No',timezone:'Timezone',disabledFilter:'DISABLED',policyConfig:'Policy Config',policyNotify:'Notify Days',policyAuto:'Auto Renew',policyRenewDay:'Renew Days',useGlobal:'Global Default',autoRenewOnDesc:'Auto Renew when overdue',autoRenewOffDesc:'Auto Disable when overdue',previewCalc:'Based on Last Renew Date & Interval',nextDue:'NEXT DUE',
+            fixedPrice:'PRICE',currency:'Currency',defaultCurrency:'Default Currency',history:'History',historyTitle:'Renewal History',totalCost:'Total Cost',totalCount:'Total Count',renewDate:'Op Date',billPeriod:'Bill Period',startDate:'Start Date',endDate:'End Date',actualPrice:'Actual Price',notePlaceholder:'Optional note...',btnAddHist:'Add Record',modify:'Edit',confirmDelHist:'Delete record?',opDate:'Op Date',amount:'Amount',period:'Period',spendingDashboard:'SPENDING DASHBOARD',monthlyBreakdown:'MONTHLY BREAKDOWN',total:'TOTAL',count:'COUNT',growth:'GROWTH',currMonth:'CURRENT',itemDetails:'ITEMS',noData:'NO DATA',predictedTag:'PREDICTED', lblPushTitle:'Push Title', pushTitle:'RenewHelper Report',
+            // 【修改点 10】添加服务级通知渠道配置相关的国际化文本
+            notifyChannels:'Notify Channels',channelsCol:'Channels',systemDefault:'System Default',batchSetChannels:'Set Channels',channelDeleted:'(Deleted)',emptyUsesAll:'Empty = Use all system channels',replaceMode:'Replace',appendMode:'Append',
+            // 【批量操作】添加批量操作相关的国际化文本
+            batchSelected:'Selected',batchItems:'items',batchRenew:'Batch Renew',batchPause:'Batch Pause',batchEnable:'Batch Enable',batchCancel:'Cancel'}
         };
         const LUNAR={info:[0x04bd8,0x04ae0,0x0a570,0x054d5,0x0d260,0x0d950,0x16554,0x056a0,0x09ad0,0x055d2,0x04ae0,0x0a5b6,0x0a4d0,0x0d250,0x1d255,0x0b540,0x0d6a0,0x0ada2,0x095b0,0x14977,0x04970,0x0a4b0,0x0b4b5,0x06a50,0x06d40,0x1ab54,0x02b60,0x09570,0x052f2,0x04970,0x06566,0x0d4a0,0x0ea50,0x06e95,0x05ad0,0x02b60,0x186e3,0x092e0,0x1c8d7,0x0c950,0x0d4a0,0x1d8a6,0x0b550,0x056a0,0x1a5b4,0x025d0,0x092d0,0x0d2b2,0x0a950,0x0b557,0x06ca0,0x0b550,0x15355,0x04da0,0x0a5b0,0x14573,0x052b0,0x0a9a8,0x0e950,0x06aa0,0x0aea6,0x0ab50,0x04b60,0x0aae4,0x0a570,0x05260,0x0f263,0x0d950,0x05b57,0x056a0,0x096d0,0x04dd5,0x04ad0,0x0a4d0,0x0d4d4,0x0d250,0x0d558,0x0b540,0x0b6a0,0x195a6,0x095b0,0x049b0,0x0a974,0x0a4b0,0x0b27a,0x06a50,0x06d40,0x0af46,0x0ab60,0x09570,0x04af5,0x04970,0x064b0,0x074a3,0x0ea50,0x06b58,0x055c0,0x0ab60,0x096d5,0x092e0,0x0c960,0x0d954,0x0d4a0,0x0da50,0x07552,0x056a0,0x0abb7,0x025d0,0x092d0,0x0cab5,0x0a950,0x0b4a0,0x0baa4,0x0ad50,0x055d9,0x04ba0,0x0a5b0,0x15176,0x052b0,0x0a930,0x07954,0x06aa0,0x0ad50,0x05b52,0x04b60,0x0a6e6,0x0a4e0,0x0d260,0x0ea65,0x0d530,0x05aa0,0x076a3,0x096d0,0x04bd7,0x04ad0,0x0a4d0,0x1d0b6,0x0d250,0x0d520,0x0dd45,0x0b5a0,0x056d0,0x055b2,0x049b0,0x0a577,0x0a4b0,0x0aa50,0x1b255,0x06d20,0x0ada0,0x14b63,0x09370,0x049f8,0x04970,0x064b0,0x168a6,0x0ea50,0x06b20,0x1a6c4,0x0aae0,0x0a2e0,0x0d2e3,0x0c960,0x0d557,0x0d4a0,0x0da50,0x05d55,0x056a0,0x0a6d0,0x055d4,0x052d0,0x0a9b8,0x0a950,0x0b4a0,0x0b6a6,0x0ad50,0x055a0,0x0aba4,0x0a5b0,0x052b0,0x0b273,0x06930,0x07337,0x06aa0,0x0ad50,0x14b55,0x04b60,0x0a570,0x054e4,0x0d160,0x0e968,0x0d520,0x0daa0,0x16aa6,0x056d0,0x04ae0,0x0a9d4,0x0a2d0,0x0d150,0x0f252,0x0d520],gan:'甲乙丙丁戊己庚辛壬癸'.split(''),zhi:'子丑寅卯辰巳午未申酉戌亥'.split(''),months:'正二三四五六七八九十冬腊'.split(''),days:'初一,初二,初三,初四,初五,初六,初七,初八,初九,初十,十一,十二,十三,十四,十五,十六,十七,十八,十九,二十,廿一,廿二,廿三,廿四,廿五,廿六,廿七,廿八,廿九,三十'.split(','),lYearDays(y){let s=348;for(let i=0x8000;i>0x8;i>>=1)s+=(this.info[y-1900]&i)?1:0;return s+this.leapDays(y)},leapDays(y){if(this.leapMonth(y))return(this.info[y-1900]&0x10000)?30:29;return 0},leapMonth(y){return this.info[y-1900]&0xf},monthDays(y,m){return(this.info[y-1900]&(0x10000>>m))?30:29},solar2lunar(y,m,d){if(y<1900||y>2100)return null;const base=new Date(1900,0,31),obj=new Date(y,m-1,d);let offset=Math.round((obj-base)/86400000);let ly=1900,temp=0;for(;ly<2101&&offset>0;ly++){temp=this.lYearDays(ly);offset-=temp}if(offset<0){offset+=temp;ly--}let lm=1,leap=this.leapMonth(ly),isLeap=false;for(;lm<13&&offset>0;lm++){if(leap>0&&lm===(leap+1)&&!isLeap){--lm;isLeap=true;temp=this.leapDays(ly)}else{temp=this.monthDays(ly,lm)}if(isLeap&&lm===(leap+1))isLeap=false;offset-=temp}if(offset===0&&leap>0&&lm===leap+1){if(isLeap)isLeap=false;else{isLeap=true;--lm}}if(offset<0){offset+=temp;--lm}const ld=offset+1,gIdx=(ly-4)%10,zIdx=(ly-4)%12;const yStr=this.gan[gIdx<0?gIdx+10:gIdx]+this.zhi[zIdx<0?zIdx+12:zIdx];const mStr=(isLeap?'闰':'')+this.months[lm-1]+'月';return{year:ly,month:lm,day:ld,isLeap,yearStr:yStr,monthStr:mStr,dayStr:this.days[ld-1],fullStr:yStr+'年'+mStr+this.days[ld-1]}}};
         
@@ -3037,8 +3195,31 @@ const HTML = `<!DOCTYPE html>
                     }
                 }
 
+                // 【修改点 2】添加服务级通知渠道配置相关的计算属性
+                // 已启用的通知渠道（供服务配置使用）
+                const enabledChannels = computed(() => {
+                    const channels = settingsForm.value.notifyChannels || settings.value.notifyChannels || [];
+                    return channels.filter(ch => ch.enabled);
+                });
+
+                // 渠道ID到名称的映射（用于显示）
+                const channelIdToName = computed(() => {
+                    const map = {};
+                    const channels = settings.value.notifyChannels || [];
+                    channels.forEach(ch => {
+                        map[ch.id] = ch.name;
+                    });
+                    return map;
+                });
+
+                // 获取渠道名称的函数
+                const getChannelName = (chId) => {
+                    return channelIdToName.value[chId] || t('channelDeleted');
+                };
+
                 // 【修改点 2】notifyTime 从字符串改为数组，支持多个通知时间
-                const form = ref({ id:'', name:'', createDate:'', lastRenewDate:'', intervalDays:30, cycleUnit:'day', type:'cycle', message:'', enabled:true, tags:[], useLunar:false, notifyDays:3, notifyTime: ['08:00'], autoRenew:true, autoRenewDays:3, fixedPrice:0, currency:'CNY', renewHistory:[] });
+                // 【修改点 3】添加 notifyChannels 字段，支持服务级通知渠道配置
+                const form = ref({ id:'', name:'', createDate:'', lastRenewDate:'', intervalDays:30, cycleUnit:'day', type:'cycle', message:'', enabled:true, tags:[], useLunar:false, notifyDays:3, notifyTime: ['08:00'], autoRenew:true, autoRenewDays:3, fixedPrice:0, currency:'CNY', renewHistory:[], notifyChannels:[] });
                 const settingsForm = ref({ 
                     notifyUrl:'', 
                     enableNotify:true, 
@@ -3100,6 +3281,95 @@ const HTML = `<!DOCTYPE html>
                         {k:'body', l:'Body Template', p:'{"msg":"{body}"}'}
                     ]},
                 ];
+
+                // 【批量操作】批量操作状态和函数
+                const selectedRows = ref([]);
+                const tableRef = ref(null);
+                const handleSelectionChange = (rows) => { selectedRows.value = rows; };
+                const clearSelection = () => { if(tableRef.value) tableRef.value.clearSelection(); selectedRows.value = []; };
+
+                const batchDelete = async () => {
+                    const count = selectedRows.value.length;
+                    if (count === 0) return;
+                    try {
+                        await ElMessageBox.confirm(
+                            t('msg.batchDeleteConfirm').replace('%n', count),
+                            t('batchDelete'),
+                            { confirmButtonText: t('yes'), cancelButtonText: t('no'), type: 'warning' }
+                        );
+                        const ids = selectedRows.value.map(r => r.id);
+                        const newList = list.value.filter(i => !ids.includes(i.id));
+                        await saveData(newList, null, false);
+                        list.value = newList;
+                        tableKey.value++;
+                        clearSelection();
+                        ElMessage.success(t('msg.batchDeleteSuccess').replace('%n', count));
+                    } catch {}
+                };
+
+                const batchToggle = async (enabled) => {
+                    const count = selectedRows.value.length;
+                    if (count === 0) return;
+                    selectedRows.value.forEach(r => { r.enabled = enabled; });
+                    await saveData(null, null, false);
+                    tableKey.value++;
+                    clearSelection();
+                    ElMessage.success(t('msg.batchToggleSuccess').replace('%n', count));
+                };
+
+                const batchRenew = async () => {
+                    const count = selectedRows.value.length;
+                    if (count === 0) return;
+                    try {
+                        await ElMessageBox.confirm(
+                            t('msg.batchRenewConfirm').replace('%n', count),
+                            t('batchRenew'),
+                            { confirmButtonText: t('yes'), cancelButtonText: t('no'), type: 'warning' }
+                        );
+                        const todayStr = getLocalToday();
+                        selectedRows.value.forEach(r => {
+                            if (r.nextDueDate) r.lastDueDate = r.nextDueDate;
+                            r.lastRenewDate = todayStr;
+                            r.manualRenewCount = (r.manualRenewCount || 0) + 1;
+                        });
+                        await saveData(null, null, false);
+                        tableKey.value++;
+                        clearSelection();
+                        ElMessage.success(t('msg.batchRenewSuccess').replace('%n', count));
+                    } catch {}
+                };
+
+                // 【批量操作】批量设置通知渠道状态和函数
+                const batchChannelDialogVisible = ref(false);
+                const batchChannelSelection = ref([]);
+                const batchChannelMode = ref('replace');
+
+                const batchSetChannels = () => {
+                    if (selectedRows.value.length === 0) return;
+                    batchChannelSelection.value = [];
+                    batchChannelMode.value = 'replace';
+                    batchChannelDialogVisible.value = true;
+                };
+
+                const confirmBatchSetChannels = async () => {
+                    const count = selectedRows.value.length;
+                    selectedRows.value.forEach(r => {
+                        if (batchChannelMode.value === 'replace') {
+                            r.notifyChannels = [...batchChannelSelection.value];
+                        } else {
+                            // 追加模式：合并并去重
+                            const existing = r.notifyChannels || [];
+                            r.notifyChannels = [...new Set([...existing, ...batchChannelSelection.value])];
+                        }
+                    });
+                    await saveData(null, null, false);
+                    tableKey.value++;
+                    clearSelection();
+                    batchChannelDialogVisible.value = false;
+                    ElMessage.success(
+                        (lang.value === 'zh' ? '已更新 ' : 'Updated ') + count + (lang.value === 'zh' ? ' 个服务' : ' services')
+                    );
+                };
 
                 // Dark Mode State
                 const isDark = ref(document.documentElement.classList.contains('dark'));
@@ -3862,8 +4132,8 @@ const HTML = `<!DOCTYPE html>
                     } catch (e) { return isoStr; }
                 };                
 
-                // 【修改点 4】新增服务时，notifyTime 使用数组格式
-                const openAdd = () => { isEdit.value=false; const d=getLocalToday(); form.value={id:Date.now().toString(),name:'',createDate:d,lastRenewDate:d,intervalDays:30,cycleUnit:'day',type:'cycle',enabled:true,tags:[],useLunar:false, notifyDays:3, notifyTime: ['08:00'], autoRenew:true, autoRenewDays:3, fixedPrice:0, currency:settings.value.defaultCurrency||'CNY', renewHistory:[]}; dialogVisible.value=true; };
+                // 【修改点 4】新增服务时，notifyTime 使用数组格式，添加 notifyChannels 字段
+                const openAdd = () => { isEdit.value=false; const d=getLocalToday(); form.value={id:Date.now().toString(),name:'',createDate:d,lastRenewDate:d,intervalDays:30,cycleUnit:'day',type:'cycle',enabled:true,tags:[],useLunar:false, notifyDays:3, notifyTime: ['08:00'], autoRenew:true, autoRenewDays:3, fixedPrice:0, currency:settings.value.defaultCurrency||'CNY', renewHistory:[], notifyChannels:[]}; dialogVisible.value=true; };
                 // 【修改点 5】编辑服务时，兼容旧数据的字符串格式，自动转换为数组
                 const editItem = (row) => {
                     isEdit.value=true;
@@ -3874,7 +4144,8 @@ const HTML = `<!DOCTYPE html>
                     } else if (!Array.isArray(notifyTimeValue)) {
                         notifyTimeValue = ['08:00'];
                     }
-                    form.value={...row,cycleUnit:row.cycleUnit||'day',tags:[...(row.tags||[])],useLunar:!!row.useLunar, notifyDays:(row.notifyDays!==undefined?row.notifyDays:3), notifyTime: notifyTimeValue, autoRenew:row.autoRenew!==false, autoRenewDays:(row.autoRenewDays!==undefined?row.autoRenewDays:3)};
+                    // 【修改点 5】兼容处理：添加 notifyChannels 字段，旧数据默认为空数组
+                    form.value={...row,cycleUnit:row.cycleUnit||'day',tags:[...(row.tags||[])],useLunar:!!row.useLunar, notifyDays:(row.notifyDays!==undefined?row.notifyDays:3), notifyTime: notifyTimeValue, autoRenew:row.autoRenew!==false, autoRenewDays:(row.autoRenewDays!==undefined?row.autoRenewDays:3), notifyChannels: Array.isArray(row.notifyChannels) ? [...row.notifyChannels] : []};
                     dialogVisible.value=true;
                 };
                 const openSettings = () => {
@@ -4766,16 +5037,23 @@ const HTML = `<!DOCTYPE html>
                     handleChannelSelection, openAddChannel, editChannel, saveChannel, deleteChannel, batchDeleteChannels, testDynamicChannel,
                     calendarUrl, copyIcsUrl, resetCalendarToken, migrateOldData, manualRenew,RefreshRight,timezoneList,currentPage, pageSize, pagedList, previewData,
                     isDark, toggleTheme, drawerSize, actionColWidth, paginationLayout, confirmDelete, confirmRenew, More, windowWidth,
-                    handleSortChange, handleFilterChange, 
+                    handleSortChange, handleFilterChange,
                     nextDueFilters, typeFilters, uptimeFilters, lastRenewFilters,
                     currencyList,editingHistoryIndex, tempHistoryItem, startEditHistory, cancelEditHistory, saveEditHistory,
-                    Money: ElementPlusIconsVue.Coin, 
+                    Money: ElementPlusIconsVue.Coin,
                     renewDialogVisible, renewMode, renewForm, openRenew, submitRenew,
                     historyDialogVisible, currentHistoryItem, historyPage, historyPageSize, pagedHistory, openHistory, saveHistoryInfo, addHistoryRecord, removeHistoryRecord, historyStats, exchangeRates, ratesLoading,
                     addHistoryDialogVisible, addHistoryForm, submitAddHistory,
                     editingHistoryIndex, tempHistoryItem, startEditHistory, saveEditHistory, cancelEditHistory, submitting, currentRenewItem,
                     getSummaries, expiringTotal, expiredTotal, totalAmount,
-                    timeOptions // 【修改点 9】导出 timeOptions 供模板使用
+                    timeOptions, // 【修改点 9】导出 timeOptions 供模板使用
+                    // 【修改点 11】导出服务级通知渠道配置相关的计算属性和函数
+                    enabledChannels, channelIdToName, getChannelName,
+                    // 【批量操作】导出批量操作相关的状态和函数
+                    selectedRows, tableRef, handleSelectionChange, clearSelection,
+                    batchDelete, batchToggle, batchRenew,
+                    batchChannelDialogVisible, batchChannelSelection, batchChannelMode,
+                    batchSetChannels, confirmBatchSetChannels
                 };
             }
         });
