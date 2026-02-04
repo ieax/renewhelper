@@ -784,8 +784,15 @@ const calculateCycleEndDate = (startDateStr, item) => {
                     const existingChannels = newSettings.channels || [];
                     const types = ['telegram', 'bark', 'pushplus', 'notifyx', 'resend', 'webhook', 'gotify', 'ntfy'];
                     types.forEach(t => {
-                        if (oldConf[t] && Object.values(oldConf[t]).some(v => v && v.trim()) && !existingChannels.some(c => c.type === t && c.name.endsWith('_Old'))) {
-                            channelCount++;
+                        const c = oldConf[t];
+                        // 逻辑同步：严格检查有效性
+                        if (c && Object.values(c).some(v => v && v.trim())) {
+                             if (t === 'bark' && (!c.key || !c.key.trim())) return;
+                             if (t === 'ntfy' && (!c.token || !c.token.trim())) return;
+                             
+                             if (!existingChannels.some(ex => ex.type === t && ex.name.endsWith('_Old'))) {
+                                 channelCount++;
+                             }
                         }
                     });
                 }

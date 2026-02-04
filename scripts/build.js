@@ -19,11 +19,10 @@ function incrementVersion(version) {
 
 const oldVersion = packageJson.version || '1.0.0';
 const newVersion = incrementVersion(oldVersion);
-packageJson.version = newVersion;
+// 版本变更待成功后回写
+console.log(`🆙 计划升级版本: v${oldVersion} -> v${newVersion}`);
 
-// 回写 package.json
-fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
-console.log(`🆙 版本自动升级: v${oldVersion} -> v${newVersion}`);
+
 
 const APP_VERSION = newVersion;
 
@@ -80,6 +79,23 @@ async function build() {
     }
 
     console.log('✅ 构建完成! 请重新部署 _worker.js');
+
+    // --- 4. 构建成功后，更新版本号文件 ---
+    packageJson.version = newVersion;
+    fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
+    console.log(`💾 已保存新版本号: v${newVersion} -> package.json`);
+
+    const packageDockerJsonPath = path.join(__dirname, '../package-docker.json');
+    if (fs.existsSync(packageDockerJsonPath)) {
+        try {
+            const packageDockerJson = require(packageDockerJsonPath);
+            packageDockerJson.version = newVersion;
+            fs.writeFileSync(packageDockerJsonPath, JSON.stringify(packageDockerJson, null, 2));
+            console.log(`💾 已保存新版本号: v${newVersion} -> package-docker.json`);
+        } catch (e) {
+            console.warn('⚠️ 无法更新 package-docker.json:', e.message);
+        }
+    }
 }
 
 build();
