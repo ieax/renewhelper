@@ -206,6 +206,16 @@ const calculateCycleEndDate = (startDateStr, item) => {
     };
 
 
+    // UUID Generator (Compatible with HTTP context)
+    const generateUUID = () => {
+        if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    };
+
     const saveChannel = () => {
         if (!channelForm.value.type) return;
         if (!channelForm.value.name) return ElMessage.error(t('msg.nameReq'));
@@ -225,7 +235,7 @@ const calculateCycleEndDate = (startDateStr, item) => {
             if (realIdx !== -1) settingsForm.value.channels[realIdx] = newCh;
         } else {
             // Add
-            newCh.id = crypto.randomUUID();
+            newCh.id = generateUUID();
             if (!settingsForm.value.channels) settingsForm.value.channels = [];
             settingsForm.value.channels.push(newCh);
             // Expand list if needed

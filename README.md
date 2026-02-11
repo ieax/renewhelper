@@ -21,7 +21,7 @@
   - 支持按天、月、年为周期的自动推算。
   - 提供“循环订阅”与“到期重置”两种模式。
 - **🔔 多渠道通知**：
-  - 内置支持 **Telegram, Bark, PushPlus, NotifyX, Resend (Email), Gotify, Ntfy, Webhook**。
+  - 内置支持 **Telegram, Bark, PushPlus, Server酱3, 钉钉 (DingTalk), NotifyX, Resend (Email), Gotify, Ntfy, Webhook**。
   - 允许添加**无限个**推送渠道，支持为每个项目配置不同的推送渠道。
   - 支持自定义推送标题、提前提醒天数和每日推送时间。
 - **💰 资金流向看板** (New v2.0+)：
@@ -326,6 +326,8 @@ docker compose up -d
 | **Resend** (邮件) | **API Key**: Resend 密钥<br>**From**: 发件地址<br>**To**: 收件地址 | 1. 注册 [Resend](https://resend.com/)。<br>2. 绑定域名并获取 API Key。<br>3. `From` 必须是您验证过的域名邮箱（如 `alert@yourdomain.com`）。若您没有域名邮箱，可以使用`onboarding@resend.dev`，发送至您注册 resend 账号的邮箱。              |
 | **Gotify**        | **Server**: 服务器地址<br>**Token**: 应用 Token                    | 自建 Gotify 服务器，创建一个 Application 获取 Token。                                                                                                                                                                                                       |
 | **Ntfy**          | **Server**: 服务器 (默认 ntfy.sh)<br>**Topic**: 主题<br>**Token**: 令牌 | 1. **Server**: 若自建则填自建地址，否则留空默认为 `https://ntfy.sh`。<br>2. **Topic**: 您订阅的主题名称。<br>3. **Token**: (可选) 如果主题受保护，需填写 Access Token，否则留空。                                                                           |
+| **Server酱3**     | **UID**: 用户ID<br>**SendKey**: 发送密钥                       | 1. 登录 [Server酱3](https://sc3.ftqq.com/)。<br>2. 获取 UID 和 SendKey。                                                                                                                                                                          |
+| **钉钉** (DingTalk)| **Token**: access_token<br>**Secret**: (可选) 加签密钥 | 1. 钉钉群设置 -> 智能群助手 -> 添加机器人 -> 自定义。<br>2. 安全设置推荐勾选 **加签** (Secret) 或 **自定义关键词** 。<br>3. 复制 Webhook 地址中的 `access_token` 和加签的 `SEC...` (即 Secret)。若使用自定义关键词记得放行`Renew`，否则无法收到通知。                                                           |
 | **Webhook**       | **URL**: POST 地址                                                 | 适用于自定义开发。系统会向该 URL 发送 POST 请求：`{ "title": "...", "content": "..." }`。[WEBHOOK 配置教程](./webhook_guide_zh.md)                                                                                                                                                   |
 
 ---
@@ -389,6 +391,26 @@ docker compose up -d
     *   *不包含：敏感的 JWT Secret (导入时会自动保留新系统的 Secret)。*
 2.  **导入 (Import)**：在“系统设置”底部找到“导入数据”区域，粘贴备份文件的内容并提交。
     *   *注意：导入操作是 **覆盖式** 的，建议导入前先备份当前数据。*
+
+### 🔐 Backup API (高级备份)
+
+RenewHelper 提供了一个专用的 API 端点，允许您通过脚本自动备份数据，无需登录后台。
+
+1.  **设置密钥**：
+    - 进入 **系统设置** -> **数据管理**。
+    - 在 **Backup Key** 中设置一个高强度密钥（至少8位，包含字母和数字）。保存设置（留空则不启用）。
+2.  **调用 API**：
+    - **Endpoint**: `GET /api/backup`
+    - **Header**: `X-Backup-Key: 您的密钥`
+    - **Response**: JSON 格式的完整备份数据。
+
+**示例 (curl)**：
+
+```bash
+curl -H "X-Backup-Key: YourSecretKey123" https://your-worker.dev/api/backup > backup_$(date +%F).json
+```
+
+> ⚠️ 注意：为了安全起见，Backup API 有严格的防暴力破解限制（5分钟内错误5次将封禁IP 15分钟）。请保管好您的密钥。
 
 ### 🔄 升级旧数据
 

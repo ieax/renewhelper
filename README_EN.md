@@ -22,7 +22,7 @@
   - Supports automatic calculation based on Day, Month, or Year intervals.
   - Two modes: "Cycle Subscription" (Repeating) and "Expiration Reset" (Manual extension).
 - **🔔 Multi-Channel Notifications**:
-  - Built-in support for **Telegram, Bark, PushPlus, NotifyX, Resend (Email), Gotify, Ntfy, Webhook**.
+  - Built-in support for **Telegram, Bark, PushPlus, ServerChan3, DingTalk, NotifyX, Resend (Email), Gotify, Ntfy, Webhook**.
   - Allows adding **unlimited** notification channels, supporting different channels for each project.
   - Support customizable push titles, advance notice days, and daily push times.
 - **💰 Billing & Spending Dashboard** (New v2.0+):
@@ -301,6 +301,8 @@ In the "Settings" -> "Notifications" section, click the **Add Channel** button, 
 | **Resend** (Email) | **API Key**: Resend Key<br>**From**: Sender Email<br>**To**: Receiver Email | 1. Register at [Resend](https://resend.com/).<br>2. Bind a domain and get an API Key.<br>3. `From` must be a verified domain email (e.g., `alert@yourdomain.com`). If you don't have one, use `onboarding@resend.dev` and send to your registered email. |
 | **Gotify**         | **Server**: URL<br>**Token**: App Token                                     | Self-hosted Gotify server. Create an Application to get the Token.                                                                                                                                                                                                       |
 | **Ntfy**           | **Server**: URL (Def: ntfy.sh)<br>**Topic**: Topic<br>**Token**: Token      | 1. **Server**: Leave empty for default `https://ntfy.sh`.<br>2. **Topic**: The topic name you subscribed to.<br>3. **Token**: (Optional) Required if your topic is protected.                                                                                          |
+| **ServerChan3**    | **UID**: User ID<br>**SendKey**: Send Key                                   | 1. Login to [ServerChan3](https://sc3.ftqq.com/).<br>2. Get UID and SendKey.                                                                                                                                                                                                                                             |
+| **DingTalk**       | **Token**: access_token<br>**Secret**: (Optional) Sign Secret                 | 1. DingTalk Group -> Intelligent Assistant -> Add Robot -> Custom.<br>2. Security Settings: Recommend **Sign** (Secret) or **Custom Keywords**.<br>3. Copy `access_token` and `SEC...` (Secret) from Webhook URL. If using Custom Keywords, ensure it includes `Renew`.                                                  |
 | **Webhook**        | **URL**: POST URL                                                           | For custom development. The system sends a POST request: `{ "title": "...", "content": "..." }`. [Webhook Configuration Guide](./webhook_guide_en.md)                                                                                                                                                        |
 
 ---
@@ -363,6 +365,26 @@ The system supports full data import/export for backup or migration purposes.
     *   *Excludes: Sensitive JWT Secret (New system's secret is preserved upon import).*
 2.  **Import**: Find the "Import Data" section at the bottom of "Settings", paste the content of your backup file, and submit.
     *   *Note: Import is **OVERWRITING**. It is recommended to backup current data before importing.*
+
+### 🔐 Backup API (Advanced)
+
+RenewHelper provides a dedicated API endpoint for automated data backup via scripts without dashboard login.
+
+1.  **Set Key**:
+    - Go to **Settings** -> **Data Management**.
+    - Set a strong **Backup Key** (at least 8 chars, alphanumeric). Save settings (leave empty to disable).
+2.  **Call API**:
+    - **Endpoint**: `GET /api/backup`
+    - **Header**: `X-Backup-Key: YOUR_KEY`
+    - **Response**: JSON backup data.
+
+**Example (curl)**:
+
+```bash
+curl -H "X-Backup-Key: YourSecretKey123" https://your-worker.dev/api/backup > backup_$(date +%F).json
+```
+
+> ⚠️ Note: For security reasons, the Backup API has strict brute-force protection (5 failures in 5 min will result in a 15 min IP ban). Please keep your key safe.
 
 ### 🔄 Migrate from Older Versions
 
