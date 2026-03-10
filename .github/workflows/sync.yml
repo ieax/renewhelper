@@ -16,11 +16,8 @@ jobs:
 
     steps:
       # 步骤 1: 检出代码
-      - name: Checkout target repo
-        uses: actions/checkout@v4
-        with:
-          # 【同步工作流需要PERSONAL_ACCESS_TOKEN】在这里就指定使用你的 PAT，覆盖默认的 GITHUB_TOKEN
-          token: ${{ secrets.ACTION_TOKEN }} 
+      - uses: actions/checkout@v4
+        with: 
           persist-credentials: true
 
       # 步骤 2: 同步上游
